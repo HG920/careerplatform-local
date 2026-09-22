@@ -25,9 +25,10 @@ export default async function BrowserPage({
       select: {
         id: true,
         name: true,
-        portalUrl: true,
-        portalLastCheckedAt: true,
-        portalLastError: true,
+        applicationPortals: {
+          select: { id: true, label: true, url: true, lastCheckedAt: true, lastError: true },
+          orderBy: { createdAt: "asc" },
+        },
         _count: {
           select: {
             applications: { where: { userId: user.id, currentStage: { notIn: [...TERMINAL] } } },
@@ -68,16 +69,19 @@ export default async function BrowserPage({
           id: c.id,
           name: c.name,
           activeCount: c._count.applications,
-          portalUrl: c.portalUrl,
-          portalLastCheckedAt: c.portalLastCheckedAt?.toISOString() ?? null,
-          portalLastError: c.portalLastError,
+          portals: c.applicationPortals.map((p) => ({
+            ...p,
+            lastCheckedAt: p.lastCheckedAt?.toISOString() ?? null,
+          })),
         }))}
         quickLinks={{
           companies: careerCompanies.map((c) => ({ id: c.id, name: c.name, url: c.careerUrl! })),
           positions: positions
             .filter((p) => p.jdUrl)
             .map((p) => ({ id: p.id, label: `${p.company.name} · ${p.title}`, url: p.jdUrl! })),
-          portals: companies.filter((c) => c.portalUrl).map((c) => ({ id: c.id, name: c.name, url: c.portalUrl! })),
+          portals: companies.flatMap((c) =>
+            c.applicationPortals.map((p) => ({ id: p.id, name: p.label ? `${c.name} · ${p.label}` : c.name, url: p.url }))
+          ),
         }}
         poolPositions={positions
           .filter((p) => p.status === "EVALUATING")

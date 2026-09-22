@@ -312,6 +312,25 @@ model Company {
   aliases          CompanyAlias[]
   radarJobPostings RadarJobPosting[]
   radarJobEvents   RadarJobEvent[]
+  applicationPortals ApplicationPortal[]
+}
+
+/// One company can use different candidate systems for campus, internship
+/// and experienced hiring. Each URL keeps an independent hash/login error.
+model ApplicationPortal {
+  id            String   @id @default(cuid())
+  companyId     String
+  label         String?
+  url           String
+  contentHash   String?
+  lastCheckedAt DateTime?
+  lastError     String?
+  createdAt     DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, url])
+  @@index([companyId])
 }
 
 /// Current snapshot of postings believed still active on a company's

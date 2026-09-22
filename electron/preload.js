@@ -57,6 +57,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on("browser:form-detected", listener);
     return () => ipcRenderer.removeListener("browser:form-detected", listener);
   },
+  onApplicationSubmitted: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("browser:application-submitted", listener);
+    return () => ipcRenderer.removeListener("browser:application-submitted", listener);
+  },
   find: (options) => ipcRenderer.invoke("browser:find", options),
   findStop: () => ipcRenderer.invoke("browser:find-stop"),
   onTabs: (callback) => {

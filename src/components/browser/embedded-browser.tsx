@@ -149,6 +149,12 @@ export function EmbeddedBrowser({
   // empty fields just appeared" for the active tab; either show a one-line
   // prompt or, with 自动填每一页 on, just fill it.
   const [detected, setDetected] = useState<{ tabId: number; count: number; signature: string } | null>(null);
+  const [submitted, setSubmitted] = useState<{
+    tabId: number;
+    url: string;
+    title: string;
+    evidence: string;
+  } | null>(null);
   const autoFillEveryPage = useSyncExternalStore(
     noop,
     () => {
@@ -215,6 +221,10 @@ export function EmbeddedBrowser({
         setDetected(payload);
       }
     });
+    const offSubmitted = bridge.onApplicationSubmitted((payload) => {
+      setSubmitted(payload);
+      toast.success(`检测到“${payload.evidence}”，确认后可以记入投递看板`);
+    });
     bridge.getTabs().then(setTabsState).catch(() => {});
     if (initialUrl) bridge.navigate(initialUrl);
     return () => {
@@ -224,6 +234,7 @@ export function EmbeddedBrowser({
       offDownload();
       offFind();
       offForm();
+      offSubmitted();
     };
     // Only wire this up once per mount — re-running on every initialUrl
     // change would re-navigate away from wherever the user has since clicked.
@@ -662,6 +673,27 @@ export function EmbeddedBrowser({
             }}
           >
             这页不用
+          </button>
+        </div>
+      )}
+      {submitted && submitted.tabId === tabsState.activeId && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-xs">
+          <Check className="size-3.5 text-emerald-600" />
+          <span>官网显示“{submitted.evidence}”。如果确实提交完成，把它记进投递看板。</span>
+          <Button
+            type="button"
+            size="sm"
+            className="h-7"
+            onClick={() => {
+              setMarkOpen(true);
+              setSubmitted(null);
+            }}
+          >
+            <Send className="size-3.5" />
+            确认并建档
+          </Button>
+          <button type="button" className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => setSubmitted(null)}>
+            不是投递成功
           </button>
         </div>
       )}

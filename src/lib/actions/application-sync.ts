@@ -88,27 +88,35 @@ function shouldApply(current: ApplicationStage, next: ApplicationStage) {
 
 export async function setCompanyPortalUrl(
   companyId: string,
-  url: string | null
+  url: string,
+  label?: string | null
 ): Promise<ActionResult<null>> {
   return toActionResult(async () => {
     await requireUser();
-    const trimmed = url?.trim() || null;
-    if (trimmed && !/^https?:\/\//i.test(trimmed)) throw new UserFacingError("进度页地址要以 http(s):// 开头");
+    const trimmed = url.trim();
+    if (!/^https?:\/\//i.test(trimmed)) throw new UserFacingError("进度页地址要以 http(s):// 开头");
     const company = await db.company.findUnique({ where: { id: companyId } });
     if (!company) throw new UserFacingError("未找到该公司");
-    await db.company.update({
-      where: { id: companyId },
-      data: {
-        portalUrl: trimmed,
-        // A new URL is a new page — the old hash would suppress the first read.
-        portalContentHash: null,
-        portalLastError: null,
-        ...(trimmed ? {} : { portalLastCheckedAt: null }),
-      },
+    await db.applicationPortal.upsert({
+      where: { companyId_url: { companyId, url: trimmed } },
+      create: { companyId, url: trimmed, label: label?.trim() || null },
+      update: { label: label?.trim() || null, contentHash: null, lastError: null },
     });
     revalidatePath("/applications");
     revalidatePath("/browser");
     revalidatePath("/companies");
+    return null;
+  });
+}
+
+export async function deleteApplicationPortal(id: string): Promise<ActionResult<null>> {
+  return toActionResult(async () => {
+    await requireUser();
+    const portal = await db.applicationPortal.findUnique({ where: { id } });
+    if (!portal) throw new UserFacingError("未找到这个进度页");
+    await db.applicationPortal.delete({ where: { id } });
+    revalidatePath("/applications");
+    revalidatePath("/browser");
     return null;
   });
 }
@@ -168,18 +176,18 @@ ${pageText}
   return parsed.data;
 }
 
-async function syncOne(company: {
+async function syncOne(portal: {
   id: string;
-  name: string;
-  portalUrl: string | null;
-  portalContentHash: string | null;
+  url: string;
+  contentHash: string | null;
+  company: { id: string; name: string };
 }, force = false): Promise<{
   status: "changed" | "unchanged" | "skipped";
   changes: PortalSyncChange[];
   matched: PortalSyncMatch[];
   unmatched: PortalSyncUnmatched[];
 }> {
-  if (!company.portalUrl) return { status: "skipped", changes: [], matched: [], unmatched: [] };
+  const company = portal.company;
 
   const applications = await db.application.findMany({
     where: { companyId: company.id, userId: LOCAL_USER_ID, currentStage: { notIn: TERMINAL_STAGES } },
@@ -188,7 +196,7 @@ async function syncOne(company: {
   // Nothing in flight at this company — no point loading the page.
   if (applications.length === 0) return { status: "skipped", changes: [], matched: [], unmatched: [] };
 
-  const text = (await renderPageText(company.portalUrl, { useApplicationSession: true })).trim();
+  const text = (await renderPageText(portal.url, { useApplicationSession: true })).trim();
   if (!text) throw new Error("进度页渲染出来是空的");
   const pageHash = crypto.createHash("sha256").update(text).digest("hex");
   // A page can stay unchanged while the user's local list gains or loses an
@@ -202,10 +210,10 @@ async function syncOne(company: {
     .createHash("sha256")
     .update(`${pageHash}\u0000${applicationSignature}`)
     .digest("hex");
-  if (!force && hash === company.portalContentHash) {
-    await db.company.update({
-      where: { id: company.id },
-      data: { portalLastCheckedAt: new Date(), portalLastError: null },
+  if (!force && hash === portal.contentHash) {
+    await db.applicationPortal.update({
+      where: { id: portal.id },
+      data: { lastCheckedAt: new Date(), lastError: null },
     });
     return { status: "unchanged", changes: [], matched: [], unmatched: [] };
   }
@@ -266,9 +274,9 @@ async function syncOne(company: {
     });
   }
 
-  await db.company.update({
-    where: { id: company.id },
-    data: { portalContentHash: hash, portalLastCheckedAt: now, portalLastError: null },
+  await db.applicationPortal.update({
+    where: { id: portal.id },
+    data: { contentHash: hash, lastCheckedAt: now, lastError: null },
   });
   return {
     status: "changed",
@@ -280,10 +288,10 @@ async function syncOne(company: {
   };
 }
 
-async function runSync(companyIds?: string[], force = false): Promise<PortalSyncResult> {
-  const companies = await db.company.findMany({
-    where: { portalUrl: { not: null }, ...(companyIds ? { id: { in: companyIds } } : {}) },
-    select: { id: true, name: true, portalUrl: true, portalContentHash: true },
+async function runSync(portalIds?: string[], force = false): Promise<PortalSyncResult> {
+  const portals = await db.applicationPortal.findMany({
+    where: portalIds ? { id: { in: portalIds } } : undefined,
+    select: { id: true, url: true, contentHash: true, company: { select: { id: true, name: true } } },
   });
 
   const result: PortalSyncResult = {
@@ -297,23 +305,23 @@ async function runSync(companyIds?: string[], force = false): Promise<PortalSync
   };
   // Sequential on purpose: each check may open a hidden window and make an
   // AI call, and the render bridge already caps concurrency at 2.
-  for (const company of companies) {
+  for (const portal of portals) {
     try {
-      const outcome = await syncOne(company, force);
+      const outcome = await syncOne(portal, force);
       if (outcome.status === "skipped") result.skipped++;
       else {
         result.checked++;
-        if (outcome.status === "unchanged") result.unchanged.push(company.name);
+        if (outcome.status === "unchanged") result.unchanged.push(portal.company.name);
       }
       result.changed.push(...outcome.changes);
       result.matched.push(...outcome.matched);
       result.unmatched.push(...outcome.unmatched);
     } catch (err) {
       const message = err instanceof Error ? err.message : "同步失败";
-      result.errors.push({ companyName: company.name, message });
-      await db.company.update({
-        where: { id: company.id },
-        data: { portalLastCheckedAt: new Date(), portalLastError: message },
+      result.errors.push({ companyName: portal.company.name, message });
+      await db.applicationPortal.update({
+        where: { id: portal.id },
+        data: { lastCheckedAt: new Date(), lastError: message },
       });
     }
   }
@@ -333,11 +341,11 @@ export async function syncAllPortals(): Promise<PortalSyncResult> {
 }
 
 export async function syncPortalsNow(
-  companyId?: string,
+  portalId?: string,
   force = false
 ): Promise<ActionResult<PortalSyncResult>> {
   return toActionResult(async () => {
     await requireUser();
-    return runSync(companyId ? [companyId] : undefined, force);
+    return runSync(portalId ? [portalId] : undefined, force);
   });
 }

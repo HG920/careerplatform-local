@@ -55,6 +55,7 @@ export type DesktopBridge = {
   clearSiteData(): Promise<void>;
   dismissForm(payload: { tabId: number; signature: string }): Promise<void>;
   onFormDetected(callback: (payload: { tabId: number; count: number; signature: string }) => void): () => void;
+  onApplicationSubmitted(callback: (payload: { tabId: number; url: string; title: string; evidence: string }) => void): () => void;
   find(options: { text: string; forward?: boolean; findNext?: boolean }): Promise<void>;
   findStop(): Promise<void>;
   onTabs(callback: (state: DesktopBridgeTabsState) => void): () => void;

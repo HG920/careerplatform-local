@@ -10,6 +10,22 @@ function uploadsDir(): string {
   return process.env.LOCAL_UPLOADS_DIR ?? path.join(process.cwd(), "uploads");
 }
 
+/**
+ * Resolve one of our stored `/api/files/<name>` URLs back to a local path.
+ * This is intentionally server-only and rejects anything except a bare file
+ * name; the Electron main process uses it to attach the selected resume to a
+ * third-party `<input type="file">` without exposing the path to that page.
+ */
+export function localPathForStoredUrl(url: string): string | null {
+  const prefix = "/api/files/";
+  if (!url.startsWith(prefix)) return null;
+  const filename = url.slice(prefix.length);
+  if (!filename || filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
+    return null;
+  }
+  return path.join(uploadsDir(), filename);
+}
+
 export const ALLOWED_UPLOAD_MIME = [
   "application/pdf",
   "image/png",

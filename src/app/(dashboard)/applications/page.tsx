@@ -32,7 +32,7 @@ export default async function ApplicationsPage() {
       select: { id: true, name: true, isDefault: true },
       orderBy: { createdAt: "desc" },
     }),
-    db.company.count({ where: { portalUrl: { not: null } } }),
+    db.applicationPortal.count(),
   ]);
 
   const defaultResumeVersionId =

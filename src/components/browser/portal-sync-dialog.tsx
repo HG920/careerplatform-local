@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { setCompanyPortalUrl, syncPortalsNow } from "@/lib/actions/application-sync";
+import { deleteApplicationPortal, setCompanyPortalUrl, syncPortalsNow } from "@/lib/actions/application-sync";
 import { STAGE_LABELS } from "@/lib/stage-labels";
 
 export type PortalCompany = {
@@ -29,9 +29,7 @@ export type PortalCompany = {
   name: string;
   /** How many applications at this company are still in flight. */
   activeCount: number;
-  portalUrl: string | null;
-  portalLastCheckedAt: string | null;
-  portalLastError: string | null;
+  portals: { id: string; label: string | null; url: string; lastCheckedAt: string | null; lastError: string | null }[];
 };
 
 /**
@@ -66,13 +64,13 @@ export function PortalSyncDialog({
   } | null>(null);
 
   const canSet = !!currentUrl && currentUrl !== "about:blank";
-  const configured = companies.filter((c) => c.portalUrl);
+  const configured = companies.flatMap((c) => c.portals.map((p) => ({ ...p, companyName: c.name, activeCount: c.activeCount })));
 
   async function handleSet() {
     if (!companyId || !currentUrl || saving) return;
     setSaving(true);
     try {
-      const res = await setCompanyPortalUrl(companyId, currentUrl);
+      const res = await setCompanyPortalUrl(companyId, currentUrl, currentTitle);
       if (!res.ok) {
         toast.error(res.message);
         return;
@@ -85,7 +83,7 @@ export function PortalSyncDialog({
   }
 
   async function handleClear(id: string) {
-    const res = await setCompanyPortalUrl(id, null);
+    const res = await deleteApplicationPortal(id);
     if (!res.ok) {
       toast.error(res.message);
       return;
@@ -211,19 +209,20 @@ export function PortalSyncDialog({
                 <li key={c.id} className="flex items-start justify-between gap-2 p-3 text-sm">
                   <div className="min-w-0">
                     <p className="font-medium">
-                      {c.name}
+                      {c.companyName}
                       <span className="ml-1 text-xs font-normal text-muted-foreground">
                         {c.activeCount} 条进行中
                       </span>
                     </p>
-                    <p className="truncate text-xs text-muted-foreground" title={c.portalUrl ?? ""}>
-                      {c.portalUrl}
+                    {c.label && <p className="truncate text-xs text-muted-foreground">{c.label}</p>}
+                    <p className="truncate text-xs text-muted-foreground" title={c.url}>
+                      {c.url}
                     </p>
-                    {c.portalLastError ? (
-                      <p className="mt-0.5 text-xs text-destructive">{c.portalLastError}</p>
-                    ) : c.portalLastCheckedAt ? (
+                    {c.lastError ? (
+                      <p className="mt-0.5 text-xs text-destructive">{c.lastError}</p>
+                    ) : c.lastCheckedAt ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        上次检查 {new Date(c.portalLastCheckedAt).toLocaleString("zh-CN")}
+                        上次检查 {new Date(c.lastCheckedAt).toLocaleString("zh-CN")}
                       </p>
                     ) : (
                       <p className="mt-0.5 text-xs text-muted-foreground">还没检查过</p>

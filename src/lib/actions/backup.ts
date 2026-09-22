@@ -62,6 +62,7 @@ const TABLES = [
   "resumeDrill",
   "skillGapAnalysis",
   "autofillAnswer",
+  "applicationPortal",
   "interviewPrep",
   "groupInterviewPrep",
   "coverLetter",
@@ -120,6 +121,7 @@ const FOREIGN_KEYS: Partial<Record<TableName, [field: string, parent: TableName]
   resumeDrill: [["userId", "user"], ["resumeVersionId", "resumeVersion"], ["positionId", "position"]],
   skillGapAnalysis: [["userId", "user"], ["resumeVersionId", "resumeVersion"]],
   autofillAnswer: [["userId", "user"], ["resumeVersionId", "resumeVersion"]],
+  applicationPortal: [["companyId", "company"]],
   interviewPrep: [["userId", "user"], ["positionId", "position"]],
   groupInterviewPrep: [["userId", "user"], ["positionId", "position"]],
   coverLetter: [["userId", "user"], ["positionId", "position"]],
@@ -266,6 +268,7 @@ const COUNT_LABELS: Partial<Record<TableName, string>> = {
   positionMatch: "岗位匹配",
   skillGapAnalysis: "技能差距分析",
   autofillAnswer: "网申回答",
+  applicationPortal: "网申进度页",
   personalTask: "日程待办",
   contact: "联系人",
   interviewSession: "模拟面试",
@@ -424,6 +427,25 @@ export async function importBackup(
           await txDelegate(table).create({ data: row });
           restored++;
         }
+      }
+      // Backups made before ApplicationPortal existed only carry the legacy
+      // Company.portalUrl columns. Materialize those after restore so an old
+      // backup does not silently lose all configured progress syncing.
+      const restoredPortals = cleaned.get("applicationPortal") ?? [];
+      for (const company of cleaned.get("company") ?? []) {
+        const url = typeof company.portalUrl === "string" ? company.portalUrl : null;
+        if (!url || restoredPortals.some((p) => p.companyId === company.id && p.url === url)) continue;
+        await tx.applicationPortal.create({
+          data: {
+            id: `portal_${company.id}`,
+            companyId: String(company.id),
+            url,
+            contentHash: typeof company.portalContentHash === "string" ? company.portalContentHash : null,
+            lastCheckedAt: company.portalLastCheckedAt instanceof Date ? company.portalLastCheckedAt : null,
+            lastError: typeof company.portalLastError === "string" ? company.portalLastError : null,
+          },
+        });
+        restored++;
       }
     });
 

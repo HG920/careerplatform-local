@@ -198,6 +198,52 @@ function capturePageText() {
   return text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, 12000);
 }
 
+// Conservative success-page detection. This only proposes creating a local
+// application record; the user still confirms it in our own UI. Requiring a
+// strong phrase and a mostly-finished page avoids firing on buttons such as
+// “提交申请” before they are clicked.
+function detectApplicationSuccess() {
+  const text = ((document.body && document.body.innerText) || "").replace(/\s+/g, " ").trim();
+  const phrases = [
+    "投递成功", "申请成功", "提交成功", "简历已投递", "申请已提交",
+    "投递已完成", "感谢您的申请", "thank you for applying", "application submitted",
+    "application has been submitted", "successfully applied",
+  ];
+  const lower = text.toLowerCase();
+  const evidence = phrases.find((p) => lower.includes(p.toLowerCase()));
+  if (!evidence) return null;
+  if ((evidence === "提交成功" || evidence === "申请成功") && !/岗位|职位|招聘|简历|投递|求职|job|career|application/i.test(text)) {
+    return null;
+  }
+  const visibleEditable = Array.from(document.querySelectorAll("input, textarea, select")).filter((el) => {
+    const r = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return !el.disabled && r.width > 0 && r.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+  }).length;
+  if (visibleEditable > 2) return null;
+  return { evidence, url: location.href, title: document.title || "" };
+}
+
+function markResumeFileInputs() {
+  const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter((el) => !el.disabled);
+  let marked = 0;
+  for (const el of inputs) {
+    const label = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
+    const nearby = el.closest("label, .form-item, .ant-form-item, .el-form-item, [class*='upload']");
+    const description = [
+      el.name, el.id, el.getAttribute("aria-label"), el.getAttribute("title"),
+      label && label.textContent, nearby && nearby.textContent,
+    ].filter(Boolean).join(" ");
+    const accept = (el.getAttribute("accept") || "").toLowerCase();
+    const looksLikeResume = /简历|履历|resume|curriculum|\bcv\b/i.test(description);
+    const soleDocumentUpload = inputs.length === 1 && (!accept || /pdf|doc|document|word/.test(accept));
+    if (!looksLikeResume && !soleDocumentUpload) continue;
+    el.setAttribute("data-cp-resume-upload", "1");
+    marked++;
+  }
+  return marked;
+}
+
 // AI's honest "couldn't find this in the resume" answer for a short/choice
 // field — distinct from a real value so it never gets written into the page
 // (a sentence dropped into a 性别 dropdown would be worse than leaving it
@@ -560,6 +606,7 @@ let attachedView = null;
 // AI-answered fields from the most recent autofill run, per tab id —
 // [{id, answerId, filledValue, frame}]. Reset on every autofill call.
 const lastAiFilled = new Map();
+const submittedSignatures = new Map();
 
 function send(channel, payload) {
   if (currentWindow && !currentWindow.isDestroyed()) currentWindow.webContents.send(channel, payload);
@@ -824,6 +871,40 @@ async function fillAllFrames(pairs, frameById) {
   return { filled, failedSelects };
 }
 
+async function uploadResumeFiles(wc, filePath) {
+  let candidates = 0;
+  for (const frame of allFrames(wc)) {
+    try {
+      candidates += await frame.executeJavaScript(`(${markResumeFileInputs.toString()})()`);
+    } catch {
+      // inaccessible/disappearing frame
+    }
+  }
+  if (!candidates) return 0;
+
+  const dbg = wc.debugger;
+  const ownedAttachment = !dbg.isAttached();
+  if (ownedAttachment) dbg.attach("1.3");
+  try {
+    await dbg.sendCommand("DOM.enable");
+    const { nodes } = await dbg.sendCommand("DOM.getFlattenedDocument", { depth: -1, pierce: true });
+    const targets = (nodes || []).filter((node) => {
+      if (node.nodeName !== "INPUT" || !node.backendNodeId) return false;
+      const attrs = node.attributes || [];
+      for (let i = 0; i < attrs.length; i += 2) {
+        if (attrs[i] === "data-cp-resume-upload" && attrs[i + 1] === "1") return true;
+      }
+      return false;
+    });
+    for (const node of targets) {
+      await dbg.sendCommand("DOM.setFileInputFiles", { files: [filePath], backendNodeId: node.backendNodeId });
+    }
+    return targets.length;
+  } finally {
+    if (ownedAttachment && dbg.isAttached()) dbg.detach();
+  }
+}
+
 // ---- multi-step form watcher ----
 // 网申 wizards (基本信息 → 教育经历 → 实习 → 开放题) swap forms without a
 // page load, so the "new form appeared" signal has to come from polling the
@@ -853,6 +934,26 @@ async function checkForms() {
   if (count >= 3 && !settled.has(signature)) {
     send("browser:form-detected", { tabId: tab.id, count, signature });
   }
+}
+
+async function checkApplicationSubmitted() {
+  const tab = activeTab();
+  if (!tab || tab.view.webContents.isLoading()) return;
+  const wc = tab.view.webContents;
+  let result = null;
+  for (const frame of allFrames(wc)) {
+    try {
+      result = await frame.executeJavaScript(`(${detectApplicationSuccess.toString()})()`);
+      if (result) break;
+    } catch {
+      // frame navigated or blocks script execution
+    }
+  }
+  if (!result) return;
+  const signature = `${result.url}|${result.evidence}`;
+  if (submittedSignatures.get(tab.id) === signature) return;
+  submittedSignatures.set(tab.id, signature);
+  send("browser:application-submitted", { tabId: tab.id, ...result });
 }
 
 function markFormSettled(tabId, signature) {
@@ -991,7 +1092,10 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
   });
 
   ipcMain.handle("browser:form-dismiss", (_e, { tabId, signature }) => markFormSettled(tabId, signature));
-  if (!formWatch.timer) formWatch.timer = setInterval(() => checkForms().catch(() => {}), 2500);
+  if (!formWatch.timer) formWatch.timer = setInterval(() => {
+    checkForms().catch(() => {});
+    checkApplicationSubmitted().catch(() => {});
+  }, 2500);
 
   ipcMain.handle("browser:clear-marks", async () => {
     const tab = activeTab();
@@ -1014,7 +1118,9 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
       const profile = await profileRes.json();
 
       const { fields, frameById } = await scanAllFrames(wc);
-      if (fields.length === 0) throw new Error("这个页面上没找到可以填的表单——如果表单在弹窗里，先把它打开");
+      // A page may only contain an upload control. Keep going when a resume
+      // is selected so the attachment pass below still gets a chance to run.
+      if (fields.length === 0 && !resumeVersionId) throw new Error("这个页面上没找到可以填的表单——如果表单在弹窗里，先把它打开");
 
       const pairs = [];
       const candidates = []; // fields going to AI: {id, label, kind, options?}
@@ -1098,6 +1204,24 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
       }
 
       const { failedSelects } = await fillAllFrames(pairs, frameById);
+      let uploadedResumeCount = 0;
+      let uploadError = null;
+      if (resumeVersionId) {
+        try {
+          const fileRes = await fetch(
+            `http://localhost:${port}/api/desktop-browser/resume-file?resumeVersionId=${encodeURIComponent(resumeVersionId)}`
+          );
+          if (fileRes.ok) {
+            const file = await fileRes.json();
+            uploadedResumeCount = await uploadResumeFiles(wc, file.path);
+          } else {
+            const body = await fileRes.json().catch(() => ({}));
+            uploadError = body.error || "简历附件上传失败";
+          }
+        } catch (err) {
+          uploadError = err && err.message ? err.message : "简历附件上传失败";
+        }
+      }
       // Whatever this page looked like, it's handled — don't re-prompt for it.
       for (const frame of allFrames(wc)) {
         const r = await frame.executeJavaScript(`(${countFillableFields.toString()})()`).catch(() => null);
@@ -1116,6 +1240,8 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
       if (shortFilledCount > 0) {
         parts.push(`AI 从简历里补全了 ${shortFilledCount} 个其他字段`);
       }
+      if (uploadedResumeCount > 0) parts.push(`已上传简历附件到 ${uploadedResumeCount} 个位置`);
+      if (uploadError) parts.push(uploadError);
       if (alreadyFilled > 0) parts.push(`${alreadyFilled} 个已有内容的字段没动`);
       if (failedSelects.length > 0) {
         parts.push(`${failedSelects.length} 个下拉框没找到匹配选项（${failedSelects.slice(0, 3).join("、")}${failedSelects.length > 3 ? "…" : ""}），需要手选`);
