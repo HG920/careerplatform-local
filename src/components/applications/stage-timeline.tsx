@@ -17,7 +17,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AttachmentList } from "@/components/applications/attachment-list";
-import { STAGE_BADGE_VARIANT, STAGE_LABELS, STAGE_ORDER } from "@/lib/stage-labels";
+import { STAGE_LABELS, STAGE_ORDER } from "@/lib/stage-labels";
+import { applicationStageStyle } from "@/lib/application-stage-style";
+import { cn } from "@/lib/utils";
 import { updateStageHistory, deleteStageHistory } from "@/lib/actions/applications";
 import {
   generateStagePostmortem,
@@ -53,7 +55,7 @@ export function StageTimeline({
   canDelete: boolean;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="relative space-y-3 before:absolute before:bottom-5 before:left-[0.43rem] before:top-5 before:w-px before:bg-border">
       {entries.map((entry) => (
         <TimelineRow key={entry.id} entry={entry} canDelete={canDelete} />
       ))}
@@ -121,7 +123,7 @@ function TimelineRow({
 
   if (editing) {
     return (
-      <div className="space-y-2 rounded-md border p-3">
+      <div className="space-y-3 rounded-2xl border border-border/70 bg-background/55 p-4">
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">阶段</Label>
@@ -215,9 +217,10 @@ function TimelineRow({
   }
 
   return (
-    <div className="group border-l-2 pl-3">
-      <div className="flex items-center gap-2">
-        <Badge variant={STAGE_BADGE_VARIANT[entry.stage]}>
+    <div className="group relative ml-7 rounded-2xl border border-border/65 bg-background/50 p-3.5 shadow-[0_4px_16px_-12px_rgba(0,0,0,0.3)]">
+      <span className={cn("absolute -left-[1.92rem] top-5 size-3 rounded-full ring-4 ring-card", applicationStageStyle(entry.stage).dot)} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className={cn("h-6 border-0 px-2.5", applicationStageStyle(entry.stage).pill)}>
           {STAGE_LABELS[entry.stage]}
         </Badge>
         <span className="text-xs text-muted-foreground">
@@ -233,7 +236,7 @@ function TimelineRow({
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto h-6 px-1.5 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          className="ml-auto h-6 px-1.5 text-xs opacity-70 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
           onClick={() => setEditing(true)}
         >
           <Pencil className="mr-1 size-3" />
@@ -259,7 +262,7 @@ function TimelineRow({
               {postmortemLoading ? "复盘中..." : "AI 复盘这场面试"}
             </Button>
           ) : (
-            <div className="space-y-1.5 rounded-md bg-muted/40 p-2 text-xs">
+            <div className="space-y-1.5 rounded-xl bg-muted/55 p-3 text-xs">
               {postmortem.reflectionQuestions.length > 0 && (
                 <div>
                   <p className="font-medium text-muted-foreground">值得想清楚的问题</p>

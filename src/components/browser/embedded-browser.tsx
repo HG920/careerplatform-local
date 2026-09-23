@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Eraser,
   MoreHorizontal,
+  NotebookPen,
   Plus,
   Radar,
   RotateCw,
@@ -638,6 +639,10 @@ export function EmbeddedBrowser({
             {savingCorrections ? "记忆中..." : "记住本页回答"}
           </Button>
         )}
+        <Button type="button" size="sm" variant="ghost" onClick={() => router.push("/settings#answer-memory")} title="查看、修改或删除已记住的网申回答">
+          <NotebookPen className="size-4" />
+          回答库
+        </Button>
         <span className="mx-1 h-5 w-px bg-border" />
         <Button type="button" size="sm" variant="outline" disabled={capturing || !currentUrl} onClick={handleCapture} title="把当前页面的岗位信息用 AI 解析后加进候选岗位池">
           <Bookmark className="size-4" />

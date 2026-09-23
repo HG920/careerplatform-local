@@ -59,7 +59,7 @@ export function PersonalTaskCard({
   }
 
   return (
-    <Card>
+    <Card className="rounded-[1.5rem] border-border/65 bg-card/75 shadow-[0_16px_45px_-38px_rgba(0,0,0,0.55)] backdrop-blur-xl">
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle>我的日程</CardTitle>
         <PersonalTaskFormDialog
@@ -75,9 +75,10 @@ export function PersonalTaskCard({
       </CardHeader>
       <CardContent className="space-y-2">
         {tasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            自己写点安排，比如&ldquo;周五前联系内推人&rdquo;&ldquo;复习 XX 准备二面&rdquo;，可以关联到具体的岗位或投递记录
-          </p>
+          <div className="rounded-xl border border-border/50 bg-background/30 px-4 py-5">
+            <p className="text-sm font-medium">给自己留一项具体安排</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">例如联系内推人、准备二面，也可以关联到对应岗位。</p>
+          </div>
         ) : (
           <>
             {pending.map((t) => (

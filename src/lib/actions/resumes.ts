@@ -84,7 +84,12 @@ export async function deleteResumeVersion(id: string) {
   const resume = await db.resumeVersion.findFirst({ where: { id, userId: user.id } });
   if (!resume) return;
 
-  await db.resumeVersion.delete({ where: { id } });
+  await db.$transaction([
+    // AI-only drafts are specific to this resume. User-confirmed answers
+    // survive through the nullable SET NULL relation as reusable memory.
+    db.autofillAnswer.deleteMany({ where: { resumeVersionId: id, confirmed: false } }),
+    db.resumeVersion.delete({ where: { id } }),
+  ]);
   if (resume.fileUrl) {
     await deleteLocalFileByUrl(resume.fileUrl);
   }

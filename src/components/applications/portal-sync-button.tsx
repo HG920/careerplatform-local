@@ -24,15 +24,16 @@ export function PortalSyncButton({ configuredCount }: { configuredCount: number 
     try {
       const res = await syncPortalsNow();
       if (!res.ok) return void toast.error(res.message);
-      const { changed, errors, checked } = res.data;
+      const { changed, review, errors, checked } = res.data;
       if (changed.length > 0) {
         toast.success(
           `${changed.length} 条投递阶段已更新：` +
             changed.map((c) => `${c.companyName} ${c.title} ${STAGE_LABELS[c.from]}→${STAGE_LABELS[c.to]}`).join("；")
         );
-      } else if (errors.length === 0) {
+      } else if (errors.length === 0 && review.length === 0) {
         toast.info(checked > 0 ? "读了一遍，官网状态和看板一致" : "没有需要检查的投递");
       }
+      if (review.length > 0) toast.warning(`${review.length} 条 Offer/拒绝进度需要你在看板确认`);
       for (const e of errors) toast.error(`${e.companyName}：${e.message}`);
       router.refresh();
     } finally {

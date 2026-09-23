@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
+import { companySpecificQuestion } from "@/lib/autofill-answer-scope";
 
 const bodySchema = z.object({
   resumeVersionId: z.string().min(1),
@@ -10,12 +11,9 @@ const bodySchema = z.object({
     questionLabel: z.string().trim().min(2).max(500),
     answer: z.string().trim().min(1).max(10000),
     answerId: z.string().optional(),
+    kind: z.enum(["essay", "short"]).default("essay"),
   })).min(1),
 });
-
-function companySpecific(label: string): boolean {
-  return /公司|企业|岗位|职位|雇主|贵司|加入我们|选择我们|why (?:us|our|this company)|our company|this role/i.test(label);
-}
 
 /**
  * Store answers explicitly written or corrected by the user. These have
@@ -36,22 +34,23 @@ export async function POST(request: Request) {
 
   let saved = 0;
   for (const item of answers) {
-    const scope = companySpecific(item.questionLabel) ? contextKey : null;
-    if (companySpecific(item.questionLabel) && !scope) continue;
+    const scope = companySpecificQuestion(item.questionLabel) ? contextKey : null;
+    if (companySpecificQuestion(item.questionLabel) && !scope) continue;
     const existing = item.answerId
-      ? await db.autofillAnswer.findFirst({ where: { id: item.answerId, userId: user.id }, select: { id: true } })
+      ? await db.autofillAnswer.findFirst({ where: { id: item.answerId, userId: user.id }, select: { id: true, contextKey: true, confirmed: true } })
       : await db.autofillAnswer.findFirst({
-          where: { userId: user.id, questionLabel: item.questionLabel, contextKey: scope, kind: "essay", confirmed: true },
-          select: { id: true },
+          where: { userId: user.id, questionLabel: item.questionLabel, contextKey: scope, kind: item.kind, confirmed: true },
+          select: { id: true, contextKey: true, confirmed: true },
         });
+    const effectiveScope = existing?.confirmed && existing.contextKey === null ? null : scope;
     if (existing) {
       await db.autofillAnswer.update({
         where: { id: existing.id },
-        data: { answer: item.answer, questionLabel: item.questionLabel, contextKey: scope, kind: "essay", confirmed: true },
+        data: { answer: item.answer, questionLabel: item.questionLabel, contextKey: effectiveScope, kind: item.kind, confirmed: true },
       });
     } else {
       await db.autofillAnswer.create({
-        data: { userId: user.id, resumeVersionId, questionLabel: item.questionLabel, answer: item.answer, contextKey: scope, kind: "essay", confirmed: true },
+        data: { userId: user.id, resumeVersionId, questionLabel: item.questionLabel, answer: item.answer, contextKey: scope, kind: item.kind, confirmed: true },
       });
     }
     saved++;

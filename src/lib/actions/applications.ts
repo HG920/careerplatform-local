@@ -86,6 +86,8 @@ export async function addStageUpdate(
       data: {
         currentStage: data.stage,
         currentStageDate: enteredAt,
+        portalSuggestedStage: null,
+        portalSuggestedAt: null,
       },
     });
 
@@ -202,7 +204,7 @@ async function resyncCurrentStage(
   if (!latest) return;
   await tx.application.update({
     where: { id: applicationId },
-    data: { currentStage: latest.stage, currentStageDate: latest.enteredAt },
+    data: { currentStage: latest.stage, currentStageDate: latest.enteredAt, portalSuggestedStage: null, portalSuggestedAt: null },
   });
 }
 

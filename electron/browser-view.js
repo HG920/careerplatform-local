@@ -278,8 +278,9 @@ async function fillFields(pairs) {
   // A visible marker on everything the autofill touched, so "提交前自己检查
   // 一遍" means scanning for purple outlines rather than re-reading the
   // whole form. Two tones: profile facts vs. AI-generated text.
-  function mark(el, source) {
+  function mark(el, source, answerId) {
     el.setAttribute("data-cp-filled", source);
+    if (answerId) el.setAttribute("data-cp-answer-id", answerId);
     el.style.setProperty("outline", (source === "ai" ? "2px solid #d946ef" : source === "remembered" ? "2px solid #16a34a" : "2px solid #8b5cf6"), "important");
     el.style.setProperty("outline-offset", "1px", "important");
   }
@@ -298,7 +299,7 @@ async function fillFields(pairs) {
       if (!target) { failed.push(p.label || p.id); continue; }
       target.click();
       if (!target.checked) { failed.push(p.label || p.id); continue; }
-      mark(target.closest("label") || target, p.source || "profile");
+      mark(target.closest("label") || target, p.source || "profile", p.answerId);
       filled.push(p.id);
       continue;
     }
@@ -327,7 +328,7 @@ async function fillFields(pairs) {
     const actual = tag === "select" ? (el.options[el.selectedIndex]?.textContent || "").trim() : el.value;
     const expected = el.type === "date" || el.type === "month" ? normalizeDate(p.value, el.type) : p.value;
     if (actual !== expected) { failed.push(p.label || p.id); continue; }
-    mark(el, p.source || "profile");
+    mark(el, p.source || "profile", p.answerId);
     filled.push(p.id);
   }
   return { filled, failed };
@@ -505,9 +506,9 @@ function readFieldValues(ids) {
     if (!el) return;
     if (el.tagName.toLowerCase() === "select") {
       const selected = el.options[el.selectedIndex];
-      result[id] = selected ? selected.textContent.trim() : "";
+      result[id] = { value: selected ? selected.textContent.trim() : "", answerId: el.getAttribute("data-cp-answer-id") };
     } else {
-      result[id] = el.value;
+      result[id] = { value: el.value, answerId: el.getAttribute("data-cp-answer-id") };
     }
   });
   return result;
@@ -564,8 +565,22 @@ function fieldHaystack(field) {
   return `${field.label} ${field.placeholder} ${field.name}`.toLowerCase();
 }
 
+function isSplitNameField(field) {
+  return /(?:^|\W)(?:first|last|given|family|middle|surname)(?:\s|[-_])*name(?:$|\W)|(?:^|\W)surname(?:$|\W)|姓氏|名字|名[（(]拼音|姓[（(]拼音|名的拼音|姓的拼音|(?:^|\s)[姓名](?:\s|$)/i.test(fieldHaystack(field));
+}
+
+function isOpenEndedQuestionField(field) {
+  if (field.tag === "textarea") return true;
+  if (field.tag !== "input" || !["text", "", undefined].includes(field.type)) return false;
+  const label = fieldHaystack(field);
+  return /[?？]|为什么|为何|请描述|请介绍|请说明|谈谈|自我评价|个人优势|求职动机|职业规划|相关经历|why|describe|tell us|motivation|strength|experience|career plan|interested in/i.test(label);
+}
+
 function matchBasicField(field, profile) {
   const haystack = fieldHaystack(field);
+  // A saved full name cannot safely be split into first/last/given/family
+  // names (especially for bilingual forms). Leave these for the applicant.
+  if (isSplitNameField(field)) return null;
   // Broad English tokens often occur inside a different question's label.
   if (/company.?name|employer.?name|school.?name|岗位名称|公司名称|企业名称/.test(haystack)) return null;
   for (const rule of BASIC_FIELD_RULES) {
@@ -589,7 +604,7 @@ function matchBasicField(field, profile) {
 
 function isNeverGuessField(field) {
   const haystack = fieldHaystack(field);
-  return NEVER_GUESS_KEYWORDS.some((k) => haystack.includes(k.toLowerCase()));
+  return isSplitNameField(field) || NEVER_GUESS_KEYWORDS.some((k) => haystack.includes(k.toLowerCase()));
 }
 
 function normalizeUrl(input) {
@@ -609,7 +624,12 @@ function portalContext(rawUrl) {
     .filter(([key]) => /company|tenant|organization|orgid|brand|recruitment/i.test(key))
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
-  return `${url.origin}${url.pathname}${tenant ? `?${tenant}` : ""}`.slice(0, 300);
+  // A company's own site is stable across /apply and /candidate pages.
+  // Shared job boards are not company identities: without a tenant id, stay
+  // on this exact page path rather than leaking an answer across employers.
+  const sharedHost = /(?:^|\.)(?:mokahr\.com|beisen\.com|zhaopin\.com|zhipin\.com|liepin\.com|51job\.com|lagou\.com|nowcoder\.com|shixiseng\.com)$/i.test(url.hostname);
+  if (sharedHost && !tenant) return `${url.origin}${url.pathname}`.slice(0, 300);
+  return `${url.origin}${tenant ? `?${tenant}` : ""}`.slice(0, 300);
 }
 
 const ZOOM_STEP = 0.1;
@@ -1229,7 +1249,7 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
       if (wc.isDestroyed() || wc.getURL() !== initialUrl || activeId !== tab.id) throw new Error("页面或标签已切换，已停止写入；请在当前页面重新填充");
       const { filled, failed } = await fillAllFrames(pairs, frameById);
       const filledSet = new Set(filled);
-      lastAiFilled.set(tab.id, pairs.filter((p) => p.source !== "profile" && p.answerId && filledSet.has(p.id) && p.tag === "textarea")
+      lastAiFilled.set(tab.id, pairs.filter((p) => p.source !== "profile" && p.answerId && filledSet.has(p.id) && isOpenEndedQuestionField(fields.find((f) => f.id === p.id) || p))
         .map((p) => ({ id: p.id, answerId: p.answerId, label: p.label, filledValue: p.value })));
       const basicFilled = pairs.filter((p) => p.source === "profile" && filledSet.has(p.id)).length;
       const essayFilled = pairs.filter((p) => p.tag === "textarea" && p.source !== "profile" && filledSet.has(p.id)).length;
@@ -1286,7 +1306,7 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
         parts.push(`${failed.length} 个字段未通过写入验证（${failed.slice(0, 3).join("、")}${failed.length > 3 ? "…" : ""}），需要手填`);
       }
       if (neverGuessCount > 0) {
-        parts.push(`${neverGuessCount} 个涉及证件号/密码/同意条款，没有自动填`);
+        parts.push(`${neverGuessCount} 个需核对的姓名拆分或敏感字段，没有自动填`);
       }
       const attempted = filled.length + neverGuessCount + alreadyFilled + failed.length;
       const stillManual = fields.length - attempted;
@@ -1297,7 +1317,7 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
             : `${stillManual} 个字段简历里没有对应信息，需要自己填`
         );
       }
-      parts.push("自己修改或写完开放题后，点「记住本页回答」；提交前检查标出的字段");
+      parts.push("自己修改或写完开放题后，点「记住本页回答」；可在账号设置查看和修改；提交前检查标出的字段");
 
       send("browser:autofill-status", { phase: "done", message: parts.join("；"), details });
     } catch (err) {
@@ -1319,17 +1339,18 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
     const { fields, frameById } = await scanAllFrames(tab.view.webContents);
     for (const field of fields) {
       const label = field.label || field.placeholder || field.name;
-      if (field.tag !== "textarea" || !label || isNeverGuessField(field)) continue;
+      if (!isOpenEndedQuestionField(field) || !label || isNeverGuessField(field)) continue;
       const frame = frameById.get(field.id);
       if (!frame) continue;
       const values = await frame.executeJavaScript(`(${readFieldValues.toString()})(${JSON.stringify([field.id])})`).catch(() => ({}));
-      const value = String(values[field.id] || "").trim();
+      const snapshot = values[field.id] || {};
+      const value = String(snapshot.value || "").trim();
       if (!value) continue;
       // A text area filled by AI but left untouched is still only a draft.
-      const ai = filledList.find((f) => f.label === label && f.filledValue === value);
+      const ai = filledList.find((f) => f.answerId === snapshot.answerId && f.filledValue === value);
       if (ai) continue;
-      const changed = filledList.find((f) => f.label === label);
-      answers.push({ questionLabel: label, answer: value, answerId: changed?.answerId });
+      const changed = filledList.find((f) => f.answerId === snapshot.answerId);
+      answers.push({ questionLabel: label, answer: value, answerId: changed?.answerId, kind: field.tag === "textarea" ? "essay" : "short" });
     }
     if (!answers.length) return { saved: 0 };
 
@@ -1340,7 +1361,6 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "保存回答失败");
     const body = await res.json();
-    lastAiFilled.set(tab.id, []);
     return { saved: body.saved ?? answers.length };
   });
 }

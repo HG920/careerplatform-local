@@ -100,7 +100,7 @@ export function PortalSyncDialog({
         toast.error(res.message);
         return;
       }
-      const { changed, errors, checked, matched, unmatched, unchanged } = res.data;
+      const { changed, review, errors, checked, matched, unmatched, unchanged } = res.data;
       setSyncSummary({ matched: matched.length, unmatched: unmatched.length, unchanged: unchanged.length });
       if (changed.length > 0) {
         toast.success(
@@ -113,6 +113,7 @@ export function PortalSyncDialog({
         toast.info("没有需要检查的投递（都已结束，或没设进度页）");
       }
       if (matched.length > 0) toast.success(`成功匹配 ${matched.length} 条官网投递`);
+      if (review.length > 0) toast.warning(`${review.length} 条 Offer/拒绝进度已放入投递看板，等待你确认`);
       if (unmatched.length > 0) toast.info(`有 ${unmatched.length} 条本地投递未匹配到官网记录`);
       if (unchanged.length > 0) toast.info(`有 ${unchanged.length} 家公司状态未变化`);
       for (const e of errors) toast.error(`${e.companyName}：${e.message}`);

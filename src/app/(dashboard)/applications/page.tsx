@@ -39,15 +39,25 @@ export default async function ApplicationsPage() {
     resumeVersions.find((r) => r.isDefault)?.id ?? null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight">投递记录</h1>
-        <div className="flex items-center gap-2">
+    <div className="mx-auto max-w-[110rem] space-y-7">
+      <div className="relative overflow-hidden rounded-[1.8rem] border border-border/65 bg-card/75 px-5 py-6 shadow-[0_18px_55px_-42px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:px-7 sm:py-8">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-28 size-72 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-3 flex items-center gap-2 text-[11px] font-semibold tracking-[0.2em] text-primary uppercase">
+              <span className="size-1.5 rounded-full bg-primary shadow-[0_0_12px_var(--primary)]" />
+              APPLICATION SPACE
+            </p>
+            <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">投递记录</h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">从发出申请到收到 Offer，把每一次进展收在同一个清晰的工作台。</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
           <PortalSyncButton configuredCount={portalCount} />
           <AddApplicationDialog
             resumeVersions={resumeVersions}
             defaultResumeVersionId={defaultResumeVersionId}
           />
+          </div>
         </div>
       </div>
 

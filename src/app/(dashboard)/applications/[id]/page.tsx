@@ -10,7 +10,10 @@ import { ApplicationEditForm } from "@/components/applications/application-edit-
 import { OfferEditForm } from "@/components/applications/offer-edit-form";
 import { StageTimeline } from "@/components/applications/stage-timeline";
 import { InterviewQaCard } from "@/components/applications/interview-qa-card";
-import { STAGE_BADGE_VARIANT, STAGE_LABELS } from "@/lib/stage-labels";
+import { STAGE_LABELS } from "@/lib/stage-labels";
+import { applicationStageStyle } from "@/lib/application-stage-style";
+import { PortalReviewBanner } from "@/components/applications/portal-review-banner";
+import { cn } from "@/lib/utils";
 import type { InterviewQa } from "@/lib/validation";
 import type { StagePostmortem } from "@/lib/actions/stage-postmortem";
 
@@ -45,23 +48,53 @@ export default async function ApplicationDetailPage({
   if (!application) notFound();
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="mx-auto max-w-[96rem] space-y-6">
+      <div className="relative overflow-hidden rounded-[1.8rem] border border-border/65 bg-card/75 p-5 shadow-[0_18px_55px_-42px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-28 size-64 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative">
         <BackLink href="/applications" label="返回投递记录" />
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-          {application.company.name} · {application.title}
-        </h1>
-        <div className="mt-2">
-          <Badge variant={STAGE_BADGE_VARIANT[application.currentStage]}>
-            当前状态：{STAGE_LABELS[application.currentStage]}
+        <div className="mt-5 flex flex-wrap items-start gap-4">
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-xl font-semibold text-primary ring-1 ring-primary/15">{application.company.name.slice(0, 1)}</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-muted-foreground">{application.company.name}</p>
+            <h1 className="mt-0.5 text-2xl font-semibold tracking-[-0.04em] sm:text-3xl">{application.title}</h1>
+          </div>
+          <Badge className={cn("h-7 border-0 px-3 text-xs", applicationStageStyle(application.currentStage).pill)}>
+            <span className={cn("mr-1 size-1.5 rounded-full", applicationStageStyle(application.currentStage).dot)} />
+            {STAGE_LABELS[application.currentStage]}
           </Badge>
+        </div>
+        <div className="mt-6 grid grid-cols-2 gap-3 border-t border-border/55 pt-5 sm:grid-cols-4">
+          {[
+            { label: "投递日期", value: application.appliedDate.toLocaleDateString("zh-CN") },
+            { label: "最近更新", value: application.currentStageDate.toLocaleDateString("zh-CN") },
+            { label: "投递渠道", value: application.source || "未记录" },
+            { label: "简历版本", value: application.resumeVersion?.name || "未关联" },
+          ].map((item) => (
+            <div key={item.label} className="min-w-0">
+              <p className="text-[11px] font-medium text-muted-foreground">{item.label}</p>
+              <p className="mt-1 truncate text-sm font-semibold" title={item.value}>{item.value}</p>
+            </div>
+          ))}
+        </div>
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      {application.portalSuggestedStage && (
+        <PortalReviewBanner items={[{
+          id: application.id,
+          companyName: application.company.name,
+          title: application.title,
+          currentStage: application.currentStage,
+          suggestedStage: application.portalSuggestedStage,
+          portalStatus: application.portalStatus,
+        }]} />
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card>
           <CardHeader>
-            <CardTitle>状态流转时间线</CardTitle>
+            <CardTitle className="font-semibold">进展时间线</CardTitle>
           </CardHeader>
           <CardContent>
             <StageTimeline

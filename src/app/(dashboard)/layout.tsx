@@ -36,11 +36,11 @@ export default async function DashboardLayout({
         className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
       >
         <div
-          className="absolute -top-40 right-[-8rem] size-[36rem] rounded-full opacity-30 blur-[90px] dark:opacity-40"
+          className="absolute -top-40 right-[-8rem] size-[36rem] rounded-full opacity-20 blur-[90px] dark:opacity-25"
           style={{ background: "var(--glow-1)" }}
         />
         <div
-          className="absolute top-1/3 -left-40 size-[32rem] rounded-full opacity-20 blur-[100px] dark:opacity-30"
+          className="absolute top-1/3 -left-40 size-[32rem] rounded-full opacity-10 blur-[100px] dark:opacity-15"
           style={{ background: "var(--glow-2)" }}
         />
       </div>

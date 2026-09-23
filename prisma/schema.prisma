@@ -506,6 +506,9 @@ model Application {
   /// portal's wording is often more specific than our enum.
   portalStatus     String?
   portalStatusAt   DateTime?
+  /// Offer/rejection detected by AI is held for the user to verify.
+  portalSuggestedStage ApplicationStage?
+  portalSuggestedAt DateTime?
   salaryMin        Int?
   salaryMax        Int?
   offerNote        String?
@@ -754,7 +757,7 @@ model SkillGapAnalysis {
 model AutofillAnswer {
   id              String   @id @default(cuid())
   userId          String
-  resumeVersionId String
+  resumeVersionId String?
   questionLabel   String
   answer          String
   kind            String   @default("essay")
@@ -766,7 +769,7 @@ model AutofillAnswer {
   updatedAt       DateTime @updatedAt
 
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  resumeVersion ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+  resumeVersion ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
 
   @@index([userId, resumeVersionId])
   @@index([userId, resumeVersionId, contextKey])

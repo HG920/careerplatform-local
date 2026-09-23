@@ -61,7 +61,7 @@ export function DailyDigestCard({ initial }: { initial: DigestItem[] | null }) {
   }
 
   return (
-    <Card>
+    <Card className="rounded-[1.5rem] border-border/65 bg-card/75 shadow-[0_16px_45px_-38px_rgba(0,0,0,0.55)] backdrop-blur-xl">
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle className="flex items-center gap-1.5">
           <Sparkles className="size-4" />
@@ -75,11 +75,10 @@ export function DailyDigestCard({ initial }: { initial: DigestItem[] | null }) {
       </CardHeader>
       <CardContent className="space-y-2">
         {items === null ? (
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              AI 综合紧迫程度、岗位匹配质量，帮你排出今天最值得做的几件事——不是简单按截止日期排序。
-            </p>
-            <Button size="sm" disabled={loading} onClick={generate}>
+          <div className="rounded-xl border border-border/50 bg-background/30 px-4 py-5">
+            <p className="text-sm font-medium">从最重要的一件事开始</p>
+            <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">综合截止时间和岗位匹配度，帮你整理今天的优先顺序。</p>
+            <Button className="mt-4" size="sm" disabled={loading} onClick={generate}>
               {loading ? "生成中..." : "生成今日摘要"}
             </Button>
           </div>
@@ -89,7 +88,7 @@ export function DailyDigestCard({ initial }: { initial: DigestItem[] | null }) {
           items.map((item, i) => (
             <div
               key={i}
-              className={`flex items-start gap-2 rounded-md border p-2 text-sm ${item.done ? "opacity-50" : ""}`}
+              className={`flex items-start gap-3 rounded-xl border border-border/60 bg-background/35 p-3 text-sm ${item.done ? "opacity-50" : ""}`}
             >
               <Checkbox
                 className="mt-0.5 shrink-0"

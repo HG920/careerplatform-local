@@ -20,13 +20,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { STAGE_BADGE_VARIANT, STAGE_LABELS } from "@/lib/stage-labels";
+import { STAGE_LABELS } from "@/lib/stage-labels";
 import { daysSince, isTerminalStage } from "@/lib/reminders";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { todayKey } from "@/lib/dates";
 import { toast } from "sonner";
 import { ConfirmDeleteButton } from "@/components/ui/confirm-delete-button";
 import { deleteApplication } from "@/lib/actions/applications";
+import { applicationStageStyle } from "@/lib/application-stage-style";
+import { cn } from "@/lib/utils";
 import type { ApplicationStage } from "@prisma/client";
 
 export type ApplicationRow = {
@@ -43,6 +45,7 @@ export type ApplicationRow = {
   nextDeadlineEnd: string | null;
   /** Verbatim wording from the company's portal, via 网申进度同步. */
   portalStatus?: string | null;
+  portalSuggestedStage?: ApplicationStage | null;
   company: { name: string };
 };
 
@@ -86,15 +89,15 @@ export function ApplicationsTable({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <span className="shrink-0 text-sm text-muted-foreground">按状态筛选：</span>
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">筛选阶段</span>
           <Select
             value={stageFilter}
             onValueChange={(value) => setStageFilter(value ?? "ALL")}
           >
-            <SelectTrigger className="w-full sm:w-48">
+            <SelectTrigger className="w-full rounded-xl sm:w-48">
               <SelectValue>
                 {(value: string) =>
                   value === "ALL" ? "全部" : STAGE_LABELS[value as ApplicationStage]
@@ -130,23 +133,26 @@ export function ApplicationsTable({
           return (
             // Delete sits outside the Link: nesting a button inside an anchor is
             // invalid and the tap would race the navigation.
-            <div key={app.id} className="rounded-lg border p-3">
+            <div key={app.id} className="rounded-2xl border border-border/70 bg-background/55 p-4 shadow-sm">
               <Link
                 href={`/applications/${app.id}`}
                 className="block space-y-2 transition-opacity hover:opacity-80"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{app.company.name}</p>
-                    <p className="truncate text-sm text-muted-foreground">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-sm font-semibold text-primary">{app.company.name.slice(0, 1)}</span>
+                    <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{app.company.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
                       {app.title}
                     </p>
+                    </div>
                   </div>
-                  <Badge variant={STAGE_BADGE_VARIANT[app.currentStage]}>
+                  <Badge className={cn("h-6 border-0 px-2.5", applicationStageStyle(app.currentStage).pill)}>
                     {STAGE_LABELS[app.currentStage]}
                   </Badge>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-border/55 pt-3 text-xs text-muted-foreground">
                   <span>{new Date(app.appliedDate).toLocaleDateString("zh-CN")} 投递</span>
                   <span
                     className={
@@ -159,7 +165,7 @@ export function ApplicationsTable({
                   {app.referrer && <span>内推：{app.referrer}</span>}
                 </div>
               </Link>
-              <div className="mt-2 flex justify-end">
+              <div className="mt-1 flex justify-end">
                 <ConfirmDeleteButton
                   trigger={
                     <Button size="sm" variant="ghost">
@@ -184,7 +190,7 @@ export function ApplicationsTable({
 
       <Table className="hidden md:table">
         <TableHeader>
-          <TableRow>
+          <TableRow className="border-border/55 hover:bg-transparent">
             <TableHead>公司 / 岗位</TableHead>
             <TableHead>投递日期</TableHead>
             <TableHead>当前状态</TableHead>
@@ -199,18 +205,21 @@ export function ApplicationsTable({
             const stale = daysSince(new Date(app.currentStageDate));
             const terminal = isTerminalStage(app.currentStage);
             return (
-              <TableRow key={app.id} className="cursor-pointer">
+              <TableRow key={app.id} className="border-border/45 transition-colors hover:bg-primary/[0.035]">
                 <TableCell>
-                  <Link href={`/applications/${app.id}`} className="block">
-                    <div className="font-medium">{app.company.name}</div>
-                    <div className="text-sm text-muted-foreground">{app.title}</div>
+                  <Link href={`/applications/${app.id}`} className="flex min-w-0 items-center gap-3 py-1.5 hover:text-primary">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/8 text-sm font-semibold text-primary">{app.company.name.slice(0, 1)}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">{app.company.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{app.title}</span>
+                    </span>
                   </Link>
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-xs tabular-nums text-muted-foreground">
                   {new Date(app.appliedDate).toLocaleDateString("zh-CN")}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={STAGE_BADGE_VARIANT[app.currentStage]}>
+                  <Badge className={cn("h-6 border-0 px-2.5", applicationStageStyle(app.currentStage).pill)}>
                     {STAGE_LABELS[app.currentStage]}
                   </Badge>
                 </TableCell>
@@ -223,8 +232,8 @@ export function ApplicationsTable({
                     {stale} 天
                   </span>
                 </TableCell>
-                <TableCell>{app.source ?? "-"}</TableCell>
-                <TableCell>{app.referrer ?? "-"}</TableCell>
+                <TableCell className="text-muted-foreground">{app.source ?? "—"}</TableCell>
+                <TableCell className="text-muted-foreground">{app.referrer ?? "—"}</TableCell>
                 <TableCell className="text-right">
                   <ConfirmDeleteButton
                     trigger={

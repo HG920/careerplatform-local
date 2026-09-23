@@ -13,13 +13,14 @@ import { listMailAccounts } from "@/lib/actions/mail-accounts";
 import { getDataFreshness } from "@/lib/actions/backup";
 import { UpdateCard } from "@/components/settings/update-card";
 import { ApplicationProfileCard } from "@/components/settings/application-profile-card";
+import { AutofillMemoryCard } from "@/components/settings/autofill-memory-card";
 import { parseApplicationProfile } from "@/lib/application-profile";
 import { db } from "@/lib/db";
 import { version } from "../../../../package.json";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [aiKeys, appSettings, mailAccounts, freshnessResult, resumeVersions] = await Promise.all([
+  const [aiKeys, appSettings, mailAccounts, freshnessResult, resumeVersions, rememberedAnswers] = await Promise.all([
     getAiKeysOverview(user.id),
     getAppSettings(),
     listMailAccounts(user.id),
@@ -28,6 +29,11 @@ export default async function SettingsPage() {
       where: { userId: user.id },
       select: { id: true, name: true },
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    }),
+    db.autofillAnswer.findMany({
+      where: { userId: user.id, confirmed: true },
+      select: { id: true, questionLabel: true, answer: true, kind: true, contextKey: true, updatedAt: true },
+      orderBy: { updatedAt: "desc" },
     }),
   ]);
   const freshness = freshnessResult.ok ? freshnessResult.data : null;
@@ -52,6 +58,7 @@ export default async function SettingsPage() {
           }}
         />
         <ApplicationProfileCard initial={parseApplicationProfile(user.applicationProfile)} resumeVersions={resumeVersions} />
+        <AutofillMemoryCard initial={rememberedAnswers.map((answer) => ({ ...answer, updatedAt: answer.updatedAt.toISOString() }))} />
         <AppearanceForm />
         <AiSettingsForm keys={aiKeys} />
         <ProxySettingsCard initial={appSettings} />

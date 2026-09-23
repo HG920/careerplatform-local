@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Clock, Send, Trophy, XCircle, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, Clock, Send, Trophy, XCircle, type LucideIcon } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,40 +113,70 @@ export default async function DashboardPage() {
   }));
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-semibold tracking-tight">总览</h1>
+    <div className="mx-auto max-w-[110rem] space-y-7">
+      <div className="relative overflow-hidden rounded-[1.8rem] border border-border/65 bg-card/75 px-5 py-6 shadow-[0_18px_55px_-42px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:px-7 sm:py-8">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-28 size-72 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-3 flex items-center gap-2 text-[11px] font-semibold tracking-[0.2em] text-primary uppercase">
+              <span className="size-1.5 rounded-full bg-primary shadow-[0_0_12px_var(--primary)]" />
+              YOUR WORKSPACE
+            </p>
+            <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">总览</h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">把重要进展、下一步行动和求职节奏，都放在一眼能掌握的地方。</p>
+          </div>
+          <Link href="/applications" className="inline-flex w-fit items-center gap-2 rounded-full border border-border/70 bg-background/65 px-4 py-2 text-sm font-medium transition-colors hover:bg-accent">
+            查看投递记录 <ArrowUpRight className="size-4" />
+          </Link>
+        </div>
+      </div>
 
-      <OnboardingCard steps={onboardingSteps} />
-
-      <DailyDigestCard initial={dailyDigest} />
-
-      <WeeklyReviewCard initial={weeklyReview} />
-
-      <TodoCard todos={todos} />
-
-      <PersonalTaskCard
-        tasks={personalTasks.map((t) => ({
-          id: t.id,
-          title: t.title,
-          note: t.note,
-          dueDate: t.dueDate?.toISOString() ?? null,
-          dueDateEnd: t.dueDateEnd?.toISOString() ?? null,
-          positionId: t.positionId,
-          applicationId: t.applicationId,
-          done: t.done,
-        }))}
-        positions={positionOptions}
-        applications={applicationOptions}
-      />
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         <StatCard label="总投递数" value={total} icon={Send} tone="brand" />
         <StatCard label="进行中" value={inProgress} icon={Clock} tone="amber" />
         <StatCard label="Offer" value={offers} icon={Trophy} tone="emerald" />
         <StatCard label="已结束" value={rejected} icon={XCircle} tone="slate" />
       </div>
 
-      <FunnelCard levels={levels} total={total} outcomes={outcomes} />
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-[-0.025em]">今日工作台</h2>
+          <p className="mt-1 text-xs text-muted-foreground">先处理眼前的事，再回看整体进展。</p>
+        </div>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr] xl:items-start">
+        <div className="space-y-5">
+          <DailyDigestCard initial={dailyDigest} />
+          <TodoCard todos={todos} />
+        </div>
+        <div className="space-y-5">
+          <PersonalTaskCard
+            tasks={personalTasks.map((t) => ({
+              id: t.id,
+              title: t.title,
+              note: t.note,
+              dueDate: t.dueDate?.toISOString() ?? null,
+              dueDateEnd: t.dueDateEnd?.toISOString() ?? null,
+              positionId: t.positionId,
+              applicationId: t.applicationId,
+              done: t.done,
+            }))}
+            positions={positionOptions}
+            applications={applicationOptions}
+          />
+          <WeeklyReviewCard initial={weeklyReview} />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-[-0.025em]">进展回顾</h2>
+          <p className="mt-1 text-xs text-muted-foreground">用阶段转化看清求职节奏。</p>
+        </div>
+        <FunnelCard levels={levels} total={total} outcomes={outcomes} />
+      </div>
+
+      <OnboardingCard steps={onboardingSteps} />
     </div>
   );
 }
@@ -159,16 +189,17 @@ const URGENCY_STYLE: Record<Todo["urgency"], { badge: string; label: string }> =
 
 function TodoCard({ todos }: { todos: Todo[] }) {
   return (
-    <Card>
+    <Card className="rounded-[1.5rem] border-border/65 bg-card/75 shadow-[0_16px_45px_-38px_rgba(0,0,0,0.55)] backdrop-blur-xl">
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle>待办</CardTitle>
         <SendDigestButton />
       </CardHeader>
       <CardContent className="space-y-2">
         {todos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            暂时没有要处理的事，保持住
-          </p>
+          <div className="rounded-xl border border-border/50 bg-background/30 px-4 py-5">
+            <p className="text-sm font-medium">暂无待处理事项</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">有新的截止时间或阶段更新时，会自动出现在这里。</p>
+          </div>
         ) : (
           <>
             {todos.map((todo) => {
@@ -177,7 +208,7 @@ function TodoCard({ todos }: { todos: Todo[] }) {
                 <Link
                   key={todo.id}
                   href={todo.href}
-                  className="flex flex-col gap-1 rounded-md border p-2 text-sm hover:bg-muted sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-1 rounded-xl border border-border/60 bg-background/35 p-3 text-sm transition-colors hover:bg-muted/60 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium">{todo.label}</p>
@@ -206,30 +237,22 @@ function TodoCard({ todos }: { todos: Todo[] }) {
   );
 }
 
-/** Fixed semantic gradients rather than theme tokens — these read as status
- * (neutral/progress/success/closed), which stays meaningful regardless of
- * which of the three color palettes is active. Only "brand" ties to the
- * current palette, for the one card that's just a raw count with no status
- * of its own. */
+/** Semantic status colors remain stable across theme palettes. */
 const STAT_TONES = {
   brand: {
-    badge: "bg-[image:var(--gradient-accent)]",
-    glow: "color-mix(in oklch, var(--glow-1), transparent 55%)",
+    badge: "bg-primary/10 text-primary",
     value: "",
   },
   amber: {
-    badge: "bg-[linear-gradient(135deg,#f59e0b,#f97316)]",
-    glow: "color-mix(in oklch, #f59e0b, transparent 55%)",
+    badge: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
     value: "",
   },
   emerald: {
-    badge: "bg-[linear-gradient(135deg,#10b981,#059669)]",
-    glow: "color-mix(in oklch, #10b981, transparent 55%)",
+    badge: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     value: "text-emerald-600 dark:text-emerald-400",
   },
   slate: {
-    badge: "bg-[linear-gradient(135deg,#64748b,#475569)]",
-    glow: "color-mix(in oklch, #64748b, transparent 60%)",
+    badge: "bg-slate-500/10 text-slate-500 dark:text-slate-400",
     value: "text-muted-foreground",
   },
 } as const;
@@ -247,12 +270,9 @@ function StatCard({
 }) {
   const t = STAT_TONES[tone];
   return (
-    <Card>
-      <CardContent className="flex items-center gap-3.5 pt-6">
-        <div
-          className={`flex size-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-[0_4px_14px_-4px_var(--tone-glow)] ${t.badge}`}
-          style={{ "--tone-glow": t.glow } as React.CSSProperties}
-        >
+    <Card className="overflow-hidden rounded-[1.5rem] border-border/65 bg-card/75 shadow-[0_16px_45px_-38px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+      <CardContent className="flex items-center gap-3.5 py-5 sm:py-6">
+        <div className={`flex size-11 shrink-0 items-center justify-center rounded-2xl ${t.badge}`}>
           <Icon className="size-5" />
         </div>
         <div className="min-w-0">

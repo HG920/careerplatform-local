@@ -7,6 +7,7 @@ import type { GeminiSchema } from "@/lib/gemini";
 import { getFileSearchKey, getImageSearchKey, generateStructuredWithFile } from "@/lib/ai-file-search";
 import { callTextAi, getUserAiConfig } from "@/lib/ai-providers";
 import { extractResumeContent } from "@/lib/resume-extract";
+import { companySpecificQuestion } from "@/lib/autofill-answer-scope";
 
 // Mirrors the shape /api/desktop-browser/profile returns — passed through
 // so the AI has known facts (e.g. the saved name) available alongside the
@@ -85,10 +86,6 @@ function similarity(a: string, b: string): number {
 const SIMILARITY_THRESHOLD = 0.6;
 const PERSONAL_THRESHOLD = 0.72;
 
-function companySpecific(label: string): boolean {
-  return /公司|企业|岗位|职位|雇主|贵司|加入我们|选择我们|why (?:us|our|this company)|our company|this role/i.test(label);
-}
-
 // Consumed by electron/browser-view.js's autofill handler. One AI call
 // covers every field that isn't already cached or matched from the saved
 // profile — both the long open-ended questions and the short structured
@@ -138,7 +135,7 @@ export async function POST(request: Request) {
     for (const c of cached) {
       if (c.kind !== q.kind) continue;
       if (c.contextKey && c.contextKey !== contextKey) continue;
-      if (companySpecific(q.label) && !c.contextKey) continue;
+      if (companySpecificQuestion(q.label) && !c.contextKey && !c.confirmed) continue;
       if (q.kind === "choice" && (!q.options?.includes(c.answer))) continue;
       const score = similarity(q.label, c.questionLabel);
       const threshold = c.confirmed ? PERSONAL_THRESHOLD : q.kind === "essay" ? SIMILARITY_THRESHOLD : 0.9;

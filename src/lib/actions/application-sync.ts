@@ -57,6 +57,8 @@ export type PortalSyncMatch = {
   portalStatus: string;
 };
 
+export type PortalSyncReview = PortalSyncChange;
+
 export type PortalSyncUnmatched = {
   companyName: string;
   applicationId: string;
@@ -67,6 +69,7 @@ export type PortalSyncResult = {
   checked: number;
   skipped: number;
   changed: PortalSyncChange[];
+  review: PortalSyncReview[];
   matched: PortalSyncMatch[];
   unmatched: PortalSyncUnmatched[];
   unchanged: string[];
@@ -184,6 +187,7 @@ async function syncOne(portal: {
 }, force = false): Promise<{
   status: "changed" | "unchanged" | "skipped";
   changes: PortalSyncChange[];
+  review: PortalSyncReview[];
   matched: PortalSyncMatch[];
   unmatched: PortalSyncUnmatched[];
 }> {
@@ -194,7 +198,7 @@ async function syncOne(portal: {
     select: { id: true, title: true, currentStage: true },
   });
   // Nothing in flight at this company — no point loading the page.
-  if (applications.length === 0) return { status: "skipped", changes: [], matched: [], unmatched: [] };
+  if (applications.length === 0) return { status: "skipped", changes: [], review: [], matched: [], unmatched: [] };
 
   const text = (await renderPageText(portal.url, { useApplicationSession: true })).trim();
   if (!text) throw new Error("进度页渲染出来是空的");
@@ -215,7 +219,7 @@ async function syncOne(portal: {
       where: { id: portal.id },
       data: { lastCheckedAt: new Date(), lastError: null },
     });
-    return { status: "unchanged", changes: [], matched: [], unmatched: [] };
+    return { status: "unchanged", changes: [], review: [], matched: [], unmatched: [] };
   }
 
   const extraction = await extractStatuses(text.slice(0, PAGE_TEXT_CAP), company.name, applications);
@@ -227,6 +231,7 @@ async function syncOne(portal: {
 
   const now = new Date();
   const changes: PortalSyncChange[] = [];
+  const review: PortalSyncReview[] = [];
   const matched: PortalSyncMatch[] = [];
   const matchedIds = new Set<string>();
   for (const entry of extraction.entries) {
@@ -246,10 +251,20 @@ async function syncOne(portal: {
     const next = SYNCABLE_STAGES.find((s) => s === entry.stage) ?? null;
 
     await db.$transaction(async (tx) => {
+      const requiresReview = !!next && shouldApply(app.currentStage, next) && (next === "OFFER" || next === "REJECTED");
       await tx.application.update({
         where: { id: app.id },
-        data: { portalStatus, portalStatusAt: now },
+        data: {
+          portalStatus,
+          portalStatusAt: now,
+          portalSuggestedStage: requiresReview ? next : null,
+          portalSuggestedAt: requiresReview ? now : null,
+        },
       });
+      if (requiresReview && next) {
+        review.push({ companyName: company.name, applicationId: app.id, title: app.title, from: app.currentStage, to: next, portalStatus });
+        return;
+      }
       if (!next || !shouldApply(app.currentStage, next)) return;
       await tx.stageHistory.create({
         data: {
@@ -281,6 +296,7 @@ async function syncOne(portal: {
   return {
     status: "changed",
     changes,
+    review,
     matched,
     unmatched: applications
       .filter((a) => !matchedIds.has(a.id))
@@ -298,6 +314,7 @@ async function runSync(portalIds?: string[], force = false): Promise<PortalSyncR
     checked: 0,
     skipped: 0,
     changed: [],
+    review: [],
     matched: [],
     unmatched: [],
     unchanged: [],
@@ -313,7 +330,8 @@ async function runSync(portalIds?: string[], force = false): Promise<PortalSyncR
         result.checked++;
         if (outcome.status === "unchanged") result.unchanged.push(portal.company.name);
       }
-      result.changed.push(...outcome.changes);
+    result.changed.push(...outcome.changes);
+    result.review.push(...outcome.review);
       result.matched.push(...outcome.matched);
       result.unmatched.push(...outcome.unmatched);
     } catch (err) {
@@ -326,7 +344,7 @@ async function runSync(portalIds?: string[], force = false): Promise<PortalSyncR
     }
   }
 
-  if (result.changed.length > 0 || result.errors.length > 0) {
+  if (result.changed.length > 0 || result.review.length > 0 || result.errors.length > 0) {
     revalidatePath("/applications");
     revalidatePath("/dashboard");
     for (const c of result.changed) revalidatePath(`/applications/${c.applicationId}`);
@@ -347,5 +365,50 @@ export async function syncPortalsNow(
   return toActionResult(async () => {
     await requireUser();
     return runSync(portalId ? [portalId] : undefined, force);
+  });
+}
+
+/** Offer/rejection extracted from a portal needs the user's own decision. */
+export async function resolvePortalStageSuggestion(applicationId: string, accept: boolean): Promise<ActionResult<null>> {
+  return toActionResult(async () => {
+    const user = await requireUser();
+    const application = await db.application.findFirst({
+      where: { id: applicationId, userId: user.id },
+      select: { id: true, currentStage: true, portalSuggestedStage: true, portalSuggestedAt: true, portalStatus: true },
+    });
+    if (!application?.portalSuggestedStage) throw new UserFacingError("这条官网建议已处理或不存在");
+    if (accept && !shouldApply(application.currentStage, application.portalSuggestedStage)) {
+      throw new UserFacingError("投递阶段已变化，请刷新后核对");
+    }
+    await db.$transaction(async (tx) => {
+      const updated = await tx.application.updateMany({
+        where: {
+          id: applicationId,
+          userId: user.id,
+          currentStage: application.currentStage,
+          portalSuggestedStage: application.portalSuggestedStage,
+        },
+        data: {
+          portalSuggestedStage: null,
+          portalSuggestedAt: null,
+          ...(accept ? { currentStage: application.portalSuggestedStage!, currentStageDate: application.portalSuggestedAt ?? new Date() } : {}),
+        },
+      });
+      if (updated.count !== 1) throw new UserFacingError("官网建议已变化，请刷新后核对");
+      if (accept) {
+        await tx.stageHistory.create({
+          data: {
+            applicationId,
+            stage: application.portalSuggestedStage!,
+            enteredAt: application.portalSuggestedAt ?? new Date(),
+            note: `${PORTAL_SYNC_NOTE_PREFIX}（已核对）：官网显示「${application.portalStatus ?? ""}」`,
+          },
+        });
+      }
+    });
+    revalidatePath("/applications");
+    revalidatePath(`/applications/${applicationId}`);
+    revalidatePath("/dashboard");
+    return null;
   });
 }

@@ -22,12 +22,11 @@ export function FunnelCard({
   outcomes?: FunnelOutcomes;
 }) {
   return (
-    <Card>
+    <Card className="rounded-[1.5rem] border-border/65 bg-card/75 shadow-[0_16px_45px_-38px_rgba(0,0,0,0.55)] backdrop-blur-xl">
       <CardHeader>
         <CardTitle>投递漏斗</CardTitle>
         <p className="text-sm text-muted-foreground">
-          每一级是&ldquo;到达过这个阶段&rdquo;的投递数，右侧是相对上一级的转化率——不要求每条
-          记录都留下这一关的痕迹，跳过笔试直接进面试的不会被误算成&ldquo;卡在笔试关&rdquo;
+          按到达阶段统计，转化率相对上一阶段；跳过的阶段不会误记为卡关。
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -40,9 +39,9 @@ export function FunnelCard({
                 <span className="w-16 shrink-0 truncate text-xs text-muted-foreground sm:w-20 sm:text-sm">
                   {STAGE_LABELS[level.stage]}
                 </span>
-                <div className="h-6 flex-1 overflow-hidden rounded-sm bg-muted">
+                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-6 rounded-r-sm bg-primary"
+                    className="h-full rounded-full bg-[image:var(--gradient-accent)]"
                     style={{ width: `${Math.max(level.shareOfTotal * 100, level.count > 0 ? 2 : 0)}%` }}
                   />
                 </div>

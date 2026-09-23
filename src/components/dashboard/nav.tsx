@@ -95,13 +95,13 @@ function NavItem({
       href={link.href}
       onClick={onNavigate}
       className={cn(
-        "flex items-center gap-2.5 rounded-full px-3.5 py-2 text-sm font-medium transition-all duration-200 ease-(--ease-apple)",
+        "flex items-center gap-2.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-all duration-200 ease-(--ease-apple)",
         active
-          ? "bg-[image:var(--gradient-accent)] text-primary-foreground shadow-[0_2px_10px_-3px_color-mix(in_oklch,var(--glow-1),transparent_35%)]"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          ? "bg-primary/10 text-primary"
+          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
       )}
     >
-      <Icon className="size-4 shrink-0" />
+      <Icon className="size-4 shrink-0" strokeWidth={active ? 2.1 : 1.8} />
       {link.label}
     </Link>
   );
@@ -124,7 +124,7 @@ function NavContent({
       <div className="space-y-6">
         <div className="flex items-center gap-2.5 px-2 text-lg font-semibold tracking-tight">
           <BrandMark
-            className="size-7 shrink-0 rounded-xl shadow-[0_3px_10px_-2px_color-mix(in_oklch,var(--glow-1),transparent_20%)]"
+            className="size-8 shrink-0 rounded-xl shadow-[0_3px_12px_-5px_rgba(0,0,0,0.4)]"
           />
           求职罗盘
         </div>
