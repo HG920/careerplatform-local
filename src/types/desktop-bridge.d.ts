@@ -13,6 +13,7 @@ export type DesktopBridgeTabsState = { tabs: DesktopBridgeTab[]; activeId: numbe
 export type DesktopBridgeAutofillStatus = {
   phase: "scanning" | "ai" | "done" | "error";
   message: string;
+  details?: { label: string; state: string }[];
 };
 
 export type DesktopBridgeCapturedPage = { url: string; title: string; text: string };
@@ -36,7 +37,7 @@ export type DesktopBridge = {
   stop(): Promise<void>;
   setBounds(rect: DesktopBridgeRect | null): Promise<void>;
   autofill(resumeVersionId?: string): Promise<void>;
-  saveCorrections(): Promise<{ saved: number }>;
+  saveCorrections(resumeVersionId: string): Promise<{ saved: number }>;
   clearMarks(): Promise<void>;
   capturePage(): Promise<DesktopBridgeCapturedPage>;
   screenshot(): Promise<{ dataUrl: string; url: string; title: string }>;

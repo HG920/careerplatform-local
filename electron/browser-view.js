@@ -122,7 +122,7 @@ function scanPageFields(prefix) {
       const legend = container && container.querySelector("legend");
       if (legend) label = legend.textContent.trim();
     }
-    return { radios, options, label };
+    return { radios, options, label, hasValue: radios.some((r) => r.checked) };
   }
 
   // Component-library dropdowns: a div that only becomes a list when
@@ -162,7 +162,7 @@ function scanPageFields(prefix) {
       if (!group) return;
       const id = prefix + "r" + counter++;
       group.radios.forEach((r, i) => r.setAttribute("data-cp-fill-id", id + ":" + i));
-      results.push({ id, tag: "radio", type: "radio", label: group.label, placeholder: "", name: el.getAttribute("name") || "", options: group.options });
+      results.push({ id, tag: "radio", type: "radio", label: group.label, placeholder: "", name: el.getAttribute("name") || "", options: group.options, hasValue: group.hasValue });
       return;
     }
     const id = prefix + "f" + counter++;
@@ -251,8 +251,9 @@ function markResumeFileInputs() {
 // any wording the AI might naturally produce.
 const NEEDS_MANUAL_INPUT = "NEEDS_MANUAL_INPUT";
 
-function fillFields(pairs) {
-  let filled = 0;
+async function fillFields(pairs) {
+  const filled = [];
+  const failed = [];
   // Most 网申 forms are React/Vue-controlled: writing `el.value = x` directly
   // gets silently ignored, because those frameworks override the native
   // value property's setter to track changes themselves — an event fired
@@ -279,12 +280,12 @@ function fillFields(pairs) {
   // whole form. Two tones: profile facts vs. AI-generated text.
   function mark(el, source) {
     el.setAttribute("data-cp-filled", source);
-    el.style.setProperty("outline", (source === "ai" ? "2px solid #d946ef" : "2px solid #8b5cf6"), "important");
+    el.style.setProperty("outline", (source === "ai" ? "2px solid #d946ef" : source === "remembered" ? "2px solid #16a34a" : "2px solid #8b5cf6"), "important");
     el.style.setProperty("outline-offset", "1px", "important");
   }
 
-  pairs.forEach((p) => {
-    if (!p.value) return;
+  for (const p of pairs) {
+    if (!p.value) continue;
     if (/-r\d+$/.test(p.id)) {
       // radio group (ids are "<frame>-r<n>", fields are "<frame>-f<n>"):
       // click the option whose label matches
@@ -294,18 +295,22 @@ function fillFields(pairs) {
         const text = ((wrapping ? wrapping.textContent : r.nextSibling && r.nextSibling.textContent) || r.value || "").trim();
         return text === p.value;
       });
-      if (!target) return;
+      if (!target) { failed.push(p.label || p.id); continue; }
       target.click();
+      if (!target.checked) { failed.push(p.label || p.id); continue; }
       mark(target.closest("label") || target, p.source || "profile");
-      filled++;
-      return;
+      filled.push(p.id);
+      continue;
     }
     const el = document.querySelector('[data-cp-fill-id="' + p.id + '"]');
-    if (!el) return;
+    if (!el || (p.tag && el.tagName.toLowerCase() !== p.tag) || (el.value && String(el.value).trim())) {
+      failed.push(p.label || p.id);
+      continue;
+    }
     const tag = el.tagName.toLowerCase();
     if (tag === "select") {
       const match = Array.from(el.options).find((o) => o.textContent.trim() === p.value);
-      if (!match) return;
+      if (!match) { failed.push(p.label || p.id); continue; }
       el.value = match.value;
     } else if (tag === "textarea") {
       nativeTextareaSetter.call(el, p.value);
@@ -317,10 +322,15 @@ function fillFields(pairs) {
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     el.dispatchEvent(new Event("blur", { bubbles: true }));
+    // Controlled components can revert after input/change handlers run.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const actual = tag === "select" ? (el.options[el.selectedIndex]?.textContent || "").trim() : el.value;
+    const expected = el.type === "date" || el.type === "month" ? normalizeDate(p.value, el.type) : p.value;
+    if (actual !== expected) { failed.push(p.label || p.id); continue; }
     mark(el, p.source || "profile");
-    filled++;
-  });
-  return filled;
+    filled.push(p.id);
+  }
+  return { filled, failed };
 }
 
 // Page-internal find: Electron's webContents.findInPage never emits
@@ -394,7 +404,7 @@ async function fillCustomSelects(pairs) {
   }
   function mark(el, source) {
     el.setAttribute("data-cp-filled", source);
-    el.style.setProperty("outline", (source === "ai" ? "2px solid #d946ef" : "2px solid #8b5cf6"), "important");
+    el.style.setProperty("outline", (source === "ai" ? "2px solid #d946ef" : source === "remembered" ? "2px solid #16a34a" : "2px solid #8b5cf6"), "important");
     el.style.setProperty("outline-offset", "1px", "important");
   }
   for (const p of pairs) {
@@ -427,8 +437,14 @@ async function fillCustomSelects(pairs) {
       target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       target.click();
       await sleep(150);
-      mark(container, p.source || "profile");
-      filled.push(p.id);
+      const shown = container.querySelector(".ant-select-selection-item, .el-select__selected-item, .el-select__tags");
+      const visibleValue = (shown?.textContent || container.querySelector("input[readonly]")?.value || "").trim();
+      if (visibleValue && (visibleValue === String(p.value).trim() || visibleValue.includes(String(p.value).trim()))) {
+        mark(container, p.source || "profile");
+        filled.push(p.id);
+      } else {
+        failed.push(p.label || p.id);
+      }
     } else {
       failed.push(p.label || p.id);
       document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -550,8 +566,13 @@ function fieldHaystack(field) {
 
 function matchBasicField(field, profile) {
   const haystack = fieldHaystack(field);
+  // Broad English tokens often occur inside a different question's label.
+  if (/company.?name|employer.?name|school.?name|岗位名称|公司名称|企业名称/.test(haystack)) return null;
   for (const rule of BASIC_FIELD_RULES) {
-    if (rule.keys.some((k) => haystack.includes(k.toLowerCase()))) {
+    if (rule.keys.some((k) => {
+      if (k === "name" || k === "city") return new RegExp(`(^|\\W)${k}($|\\W)`, "i").test(haystack);
+      return haystack.includes(k.toLowerCase());
+    })) {
       const value = rule.get(profile);
       if (!value) continue;
       // A choice field still has to hit one of its own options exactly.
@@ -580,6 +601,15 @@ function normalizeUrl(input) {
     return `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`;
   }
   return `https://${trimmed}`;
+}
+
+function portalContext(rawUrl) {
+  const url = new URL(rawUrl);
+  const tenant = [...url.searchParams]
+    .filter(([key]) => /company|tenant|organization|orgid|brand|recruitment/i.test(key))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+  return `${url.origin}${url.pathname}${tenant ? `?${tenant}` : ""}`.slice(0, 300);
 }
 
 const ZOOM_STEP = 0.1;
@@ -852,23 +882,27 @@ async function fillAllFrames(pairs, frameById) {
     if (!byFrame.has(frame)) byFrame.set(frame, []);
     byFrame.get(frame).push(p);
   }
-  let filled = 0;
-  const failedSelects = [];
+  const filled = [];
+  const failed = [];
   for (const [frame, subset] of byFrame) {
     const plain = subset.filter((p) => !/-s\d+$/.test(p.id));
     const custom = subset.filter((p) => /-s\d+$/.test(p.id));
     try {
-      if (plain.length) filled += await frame.executeJavaScript(`(${fillFields.toString()})(${JSON.stringify(plain)})`);
+      if (plain.length) {
+        const result = await frame.executeJavaScript(`(${fillFields.toString()})(${JSON.stringify(plain)})`);
+        filled.push(...result.filled);
+        failed.push(...result.failed);
+      }
       if (custom.length) {
         const result = await frame.executeJavaScript(`(${fillCustomSelects.toString()})(${JSON.stringify(custom)})`);
-        filled += result.filled.length;
-        failedSelects.push(...result.failed);
+        filled.push(...result.filled);
+        failed.push(...result.failed);
       }
     } catch {
-      // Frame navigated away between scan and fill.
+      failed.push(...subset.map((p) => p.label || p.id));
     }
   }
-  return { filled, failedSelects };
+  return { filled, failed };
 }
 
 async function uploadResumeFiles(wc, filePath) {
@@ -1109,6 +1143,7 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
     const tab = activeTab();
     if (!tab) return;
     const wc = tab.view.webContents;
+    const initialUrl = wc.getURL();
     lastAiFilled.set(tab.id, []);
     try {
       send("browser:autofill-status", { phase: "scanning", message: "正在读取页面…" });
@@ -1137,7 +1172,7 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
         }
         const value = matchBasicField(field, profile);
         if (value) {
-          pairs.push({ id: field.id, value, source: "profile", label: field.label });
+          pairs.push({ id: field.id, value, source: "profile", label: field.label, tag: field.tag });
           continue;
         }
         const label = field.label || field.placeholder || field.name;
@@ -1156,9 +1191,6 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
       }
       const basicCount = pairs.length;
 
-      let essayCount = 0;
-      let essayReused = 0;
-      let shortFilledCount = 0;
       let aiError = null;
       if (candidates.length > 0 && !resumeVersionId) {
         aiError = "没选简历，这些字段跳过了";
@@ -1168,7 +1200,7 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
           message: `已填 ${basicCount} 个基础字段，正在用 AI 补全 ${candidates.length} 个字段…`,
         });
         try {
-          const pageContext = `${wc.getURL()}\n${wc.getTitle()}`.slice(0, 300);
+          const pageContext = portalContext(initialUrl);
           const answerRes = await fetch(`http://localhost:${port}/api/desktop-browser/answer-questions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1180,19 +1212,10 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
             for (const a of answers || []) {
               const kind = kindById.get(a.id);
               const isSentinel = a.answer.trim().toUpperCase() === NEEDS_MANUAL_INPUT;
-              if (kind !== "essay" && isSentinel) continue; // leave for manual entry
-              pairs.push({ id: a.id, value: a.answer, source: "ai", label: candidates.find((c) => c.id === a.id)?.label });
-              // Only fields actually written to the page, and only ones with
-              // a cache row behind them (answerId), are correction-worthy —
-              // matches basic profile fields aren't AI answers at all, so a
-              // wrong one means "fix your saved profile", not "correct this".
-              if (a.answerId) lastAiFilled.get(tab.id).push({ id: a.id, answerId: a.answerId, filledValue: a.answer });
-              if (kind === "essay") {
-                essayCount++;
-                if (a.reused) essayReused++;
-              } else {
-                shortFilledCount++;
-              }
+              if (isSentinel || /简历里没有相关信息|需要自己填/.test(a.answer)) continue;
+              const field = fields.find((f) => f.id === a.id);
+              if (!field || !kind) continue;
+              pairs.push({ id: a.id, value: a.answer, source: a.remembered ? "remembered" : "ai", label: field.label || field.placeholder || field.name, tag: field.tag, answerId: a.answerId, reused: a.reused, remembered: a.remembered });
             }
           } else {
             const body = await answerRes.json().catch(() => ({}));
@@ -1203,7 +1226,22 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
         }
       }
 
-      const { failedSelects } = await fillAllFrames(pairs, frameById);
+      if (wc.isDestroyed() || wc.getURL() !== initialUrl || activeId !== tab.id) throw new Error("页面或标签已切换，已停止写入；请在当前页面重新填充");
+      const { filled, failed } = await fillAllFrames(pairs, frameById);
+      const filledSet = new Set(filled);
+      lastAiFilled.set(tab.id, pairs.filter((p) => p.source !== "profile" && p.answerId && filledSet.has(p.id) && p.tag === "textarea")
+        .map((p) => ({ id: p.id, answerId: p.answerId, label: p.label, filledValue: p.value })));
+      const basicFilled = pairs.filter((p) => p.source === "profile" && filledSet.has(p.id)).length;
+      const essayFilled = pairs.filter((p) => p.tag === "textarea" && p.source !== "profile" && filledSet.has(p.id)).length;
+      const shortFilled = filled.length - basicFilled - essayFilled;
+      const rememberedFilled = pairs.filter((p) => p.remembered && filledSet.has(p.id)).length;
+      const essayReused = pairs.filter((p) => p.tag === "textarea" && p.reused && filledSet.has(p.id)).length;
+      const aiReused = essayReused - rememberedFilled;
+      const details = fields.map((field) => ({
+        label: field.label || field.placeholder || field.name || "未命名字段",
+        state: field.hasValue ? "已有内容" : isNeverGuessField(field) ? "需要手填" : filledSet.has(field.id)
+          ? pairs.find((p) => p.id === field.id)?.remembered ? "复用你的回答" : "已填入" : "未填入",
+      }));
       let uploadedResumeCount = 0;
       let uploadError = null;
       if (resumeVersionId) {
@@ -1229,27 +1267,28 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
       }
       formWatch.lastSignature.delete(tab.id);
 
-      const parts = [`已填 ${basicCount} 个基础字段`];
-      if (essayCount > 0) {
-        const fresh = essayCount - essayReused;
+      const parts = [`已验证填入 ${basicFilled} 个基础字段`];
+      if (essayFilled > 0) {
+        const fresh = essayFilled - essayReused;
         const bits = [];
-        if (essayReused > 0) bits.push(`${essayReused} 道复用了之前保存的答案`);
+        if (rememberedFilled > 0) bits.push(`${rememberedFilled} 道复用了你的回答`);
+        if (aiReused > 0) bits.push(`${aiReused} 道复用了 AI 草稿`);
         if (fresh > 0) bits.push(`${fresh} 道新生成`);
-        parts.push(`${essayCount} 道问答题已填（${bits.join("，")}）`);
+        parts.push(`${essayFilled} 道问答题已填（${bits.join("，")}）`);
       }
-      if (shortFilledCount > 0) {
-        parts.push(`AI 从简历里补全了 ${shortFilledCount} 个其他字段`);
+      if (shortFilled > 0) {
+        parts.push(`AI 从简历里补全了 ${shortFilled} 个其他字段`);
       }
       if (uploadedResumeCount > 0) parts.push(`已上传简历附件到 ${uploadedResumeCount} 个位置`);
       if (uploadError) parts.push(uploadError);
       if (alreadyFilled > 0) parts.push(`${alreadyFilled} 个已有内容的字段没动`);
-      if (failedSelects.length > 0) {
-        parts.push(`${failedSelects.length} 个下拉框没找到匹配选项（${failedSelects.slice(0, 3).join("、")}${failedSelects.length > 3 ? "…" : ""}），需要手选`);
+      if (failed.length > 0) {
+        parts.push(`${failed.length} 个字段未通过写入验证（${failed.slice(0, 3).join("、")}${failed.length > 3 ? "…" : ""}），需要手填`);
       }
       if (neverGuessCount > 0) {
         parts.push(`${neverGuessCount} 个涉及证件号/密码/同意条款，没有自动填`);
       }
-      const attempted = basicCount + essayCount + shortFilledCount + neverGuessCount + alreadyFilled + failedSelects.length;
+      const attempted = filled.length + neverGuessCount + alreadyFilled + failed.length;
       const stillManual = fields.length - attempted;
       if (stillManual > 0) {
         parts.push(
@@ -1258,9 +1297,9 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
             : `${stillManual} 个字段简历里没有对应信息，需要自己填`
         );
       }
-      parts.push("填过的地方有紫色框，提交前逐个检查一遍");
+      parts.push("自己修改或写完开放题后，点「记住本页回答」；提交前检查标出的字段");
 
-      send("browser:autofill-status", { phase: "done", message: parts.join("；") });
+      send("browser:autofill-status", { phase: "done", message: parts.join("；"), details });
     } catch (err) {
       send("browser:autofill-status", {
         phase: "error",
@@ -1269,45 +1308,40 @@ function setupBrowserViewIpc(mainWindow, serverPort) {
     }
   });
 
-  // Lets a hand-edit after autofill correct the cached answer instead of
-  // just correcting the page — otherwise the same wrong guess keeps coming
-  // back on every future site that asks a similarly-worded question.
-  // Compares each AI-answered field's *current* DOM value against what
-  // fillFields originally wrote it as; only genuinely different, non-empty
-  // values count as a correction worth saving.
-  ipcMain.handle("browser:save-corrections", async () => {
+  // Remember essays the user wrote from scratch or changed after AI fill.
+  ipcMain.handle("browser:save-corrections", async (_e, resumeVersionId) => {
     const tab = activeTab();
-    const filledList = tab ? lastAiFilled.get(tab.id) || [] : [];
-    if (!tab || !filledList.length) return { saved: 0 };
-    const ids = filledList.map((f) => f.id);
-    const current = {};
-    for (const frame of allFrames(tab.view.webContents)) {
-      const values = await frame.executeJavaScript(`(${readFieldValues.toString()})(${JSON.stringify(ids)})`).catch(() => ({}));
-      Object.assign(current, values);
+    if (!tab || !resumeVersionId) return { saved: 0 };
+    const filledList = lastAiFilled.get(tab.id) || [];
+    const answers = [];
+    // A fresh scan also includes answers the user wrote entirely by hand.
+    // Read the original AI ids first; scanning replaces the temporary DOM ids.
+    const { fields, frameById } = await scanAllFrames(tab.view.webContents);
+    for (const field of fields) {
+      const label = field.label || field.placeholder || field.name;
+      if (field.tag !== "textarea" || !label || isNeverGuessField(field)) continue;
+      const frame = frameById.get(field.id);
+      if (!frame) continue;
+      const values = await frame.executeJavaScript(`(${readFieldValues.toString()})(${JSON.stringify([field.id])})`).catch(() => ({}));
+      const value = String(values[field.id] || "").trim();
+      if (!value) continue;
+      // A text area filled by AI but left untouched is still only a draft.
+      const ai = filledList.find((f) => f.label === label && f.filledValue === value);
+      if (ai) continue;
+      const changed = filledList.find((f) => f.label === label);
+      answers.push({ questionLabel: label, answer: value, answerId: changed?.answerId });
     }
-    const corrections = filledList
-      .filter((f) => {
-        const value = current[f.id];
-        return typeof value === "string" && value.trim() && value !== f.filledValue;
-      })
-      .map((f) => ({ answerId: f.answerId, answer: current[f.id] }));
-    if (!corrections.length) return { saved: 0 };
+    if (!answers.length) return { saved: 0 };
 
     const res = await fetch(`http://localhost:${port}/api/desktop-browser/save-corrections`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ corrections }),
+      body: JSON.stringify({ resumeVersionId, contextKey: portalContext(tab.view.webContents.getURL()), answers }),
     });
-    if (!res.ok) throw new Error("保存修改失败");
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "保存回答失败");
     const body = await res.json();
-
-    // Reflects the just-saved values so re-clicking without further edits
-    // reports "0 处修改" instead of re-submitting the same correction.
-    for (const c of corrections) {
-      const record = filledList.find((f) => f.answerId === c.answerId);
-      if (record) record.filledValue = c.answer;
-    }
-    return { saved: body.saved ?? corrections.length };
+    lastAiFilled.set(tab.id, []);
+    return { saved: body.saved ?? answers.length };
   });
 }
 

@@ -59,7 +59,7 @@ export default async function BrowserPage({
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">网申浏览器</h1>
         <p className="text-sm text-muted-foreground">
-          多标签浏览网申页面。选好简历点「AI 一键填充」，填完「记为已投递」，登录后的「我的投递」页可设为进度页自动同步——填过的地方都有紫色框，提交前务必自己检查一遍
+          多标签浏览网申页面。选好简历点「AI 一键填充」；开放题写好或改好后点「记住本页回答」，下次遇到相似问题会优先复用。提交前检查填充结果和标记，提交完成后再点「记为已投递」。
         </p>
       </div>
       <EmbeddedBrowser

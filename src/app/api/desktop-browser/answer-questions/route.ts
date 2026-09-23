@@ -83,6 +83,11 @@ function similarity(a: string, b: string): number {
   return (2 * overlap) / (setA.size + setB.size);
 }
 const SIMILARITY_THRESHOLD = 0.6;
+const PERSONAL_THRESHOLD = 0.72;
+
+function companySpecific(label: string): boolean {
+  return /公司|企业|岗位|职位|雇主|贵司|加入我们|选择我们|why (?:us|our|this company)|our company|this role/i.test(label);
+}
 
 // Consumed by electron/browser-view.js's autofill handler. One AI call
 // covers every field that isn't already cached or matched from the saved
@@ -115,30 +120,35 @@ export async function POST(request: Request) {
   const cached = await db.autofillAnswer.findMany({
     where: {
       userId: user.id,
-      resumeVersionId,
-      OR: [{ contextKey }, { contextKey: null }],
+      OR: [
+        { confirmed: true, OR: [{ contextKey }, { contextKey: null }] },
+        { confirmed: false, resumeVersionId, OR: [{ contextKey }, { contextKey: null }] },
+      ],
     },
-    orderBy: { contextKey: "desc" },
+    orderBy: { updatedAt: "desc" },
   });
   // answerId ties a returned answer back to the AutofillAnswer row backing
   // it (existing for a reuse, newly created for a fresh generation) — the
   // embedded browser uses this to let the user's post-fill edits correct
   // that exact cached row instead of only ever reading it.
-  const answers: { id: string; answer: string; reused: boolean; answerId?: string }[] = [];
+  const answers: { id: string; answer: string; reused: boolean; remembered?: boolean; answerId?: string }[] = [];
   const needsGeneration: typeof questions = [];
   for (const q of questions) {
-    let best: { answer: string; score: number; id: string } | null = null;
+    let best: { answer: string; score: number; id: string; confirmed: boolean } | null = null;
     for (const c of cached) {
-      // A portal-specific answer is only reusable in the same portal context;
-      // null-context rows remain the generic fallback for every portal.
+      if (c.kind !== q.kind) continue;
       if (c.contextKey && c.contextKey !== contextKey) continue;
+      if (companySpecific(q.label) && !c.contextKey) continue;
+      if (q.kind === "choice" && (!q.options?.includes(c.answer))) continue;
       const score = similarity(q.label, c.questionLabel);
-      if (score >= SIMILARITY_THRESHOLD && (!best || score > best.score)) {
-        best = { answer: c.answer, score, id: c.id };
+      const threshold = c.confirmed ? PERSONAL_THRESHOLD : q.kind === "essay" ? SIMILARITY_THRESHOLD : 0.9;
+      const rank = score + (c.confirmed ? 1 : 0);
+      if (score >= threshold && (!best || rank > best.score)) {
+        best = { answer: c.answer, score: rank, id: c.id, confirmed: c.confirmed };
       }
     }
     if (best) {
-      answers.push({ id: q.id, answer: best.answer, reused: true, answerId: best.id });
+      answers.push({ id: q.id, answer: best.answer, reused: true, remembered: best.confirmed, answerId: best.id });
     } else {
       needsGeneration.push(q);
     }
@@ -197,7 +207,7 @@ export async function POST(request: Request) {
             `开放性问答题——基于简历里真实的经历，给每道题写一段可以直接填进网申表单的回答：\n` +
               `- 只用简历里确实有的经历、项目、技能，不要编造简历里没有的内容\n` +
               `- 每题 150-300 字，语气自然、具体，不要写"我是一个xxx的人"这类空话\n` +
-              `- 如果某道题跟简历内容完全对不上（比如问"你的家乡在哪"这种简历里没有的信息），就如实写"简历里没有相关信息，需要自己填"，不要瞎编\n\n` +
+              `- 如果没有可靠依据，只输出 ${NEEDS_MANUAL_INPUT}，不要编造\n\n` +
               essays.map((q) => `- [id:${q.id}] ${q.label}`).join("\n")
           );
         }
@@ -259,24 +269,25 @@ export async function POST(request: Request) {
         });
         const result = resultSchema.safeParse(raw);
         if (result.success) {
-          const labelById = new Map(needsGeneration.map((q) => [q.id, q.label]));
+          const questionById = new Map(needsGeneration.map((q) => [q.id, q]));
           for (const a of result.data.answers) {
+            const question = questionById.get(a.id);
+            if (!question) continue;
             // A "couldn't find it" isn't a real answer — caching it would
             // make a different site's rephrasing of the same question reuse
             // a non-answer instead of getting its own fresh attempt. No
             // answerId either: nothing gets written to the page for these
             // (see the kind!=="essay" sentinel check in browser-view.js), so
             // there's nothing a user could later correct.
-            const isSentinel = a.answer.trim().toUpperCase() === NEEDS_MANUAL_INPUT;
+            const isSentinel = a.answer.trim().toUpperCase() === NEEDS_MANUAL_INPUT ||
+              /简历里没有相关信息|需要自己填/.test(a.answer);
+            if (question.kind === "choice" && !question.options?.includes(a.answer)) continue;
             let answerId: string | undefined;
             if (!isSentinel) {
-              const label = labelById.get(a.id);
-              if (label) {
-                const created = await db.autofillAnswer.create({
-                  data: { userId: user.id, resumeVersionId, questionLabel: label, answer: a.answer, contextKey },
-                });
-                answerId = created.id;
-              }
+              const created = await db.autofillAnswer.create({
+                data: { userId: user.id, resumeVersionId, questionLabel: question.label, answer: a.answer, kind: question.kind, contextKey },
+              });
+              answerId = created.id;
             }
             answers.push({ id: a.id, answer: a.answer, reused: false, answerId });
           }

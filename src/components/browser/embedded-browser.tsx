@@ -340,14 +340,14 @@ export function EmbeddedBrowser({
   }
 
   async function handleSaveCorrections() {
-    if (!bridge || savingCorrections) return;
+    if (!bridge || savingCorrections || !resumeVersionId) return;
     setSavingCorrections(true);
     try {
-      const { saved } = await bridge.saveCorrections();
+      const { saved } = await bridge.saveCorrections(resumeVersionId);
       if (saved > 0) {
-        toast.success(`已把 ${saved} 处修改保存到答案库，下次遇到相似问题会直接用改过的版本`);
+        toast.success(`已记住 ${saved} 个你写的开放题回答，下次遇到相似问题会优先复用`);
       } else {
-        toast.info("没有检测到跟自动填充时不一样的内容");
+        toast.info("这页没有可记住的新开放题回答");
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "保存修改失败");
@@ -625,17 +625,17 @@ export function EmbeddedBrowser({
           <input type="checkbox" checked={autoFill} onChange={(e) => setAutoFillEveryPage(e.target.checked)} />
           每页自动填
         </label>
-        {status?.phase === "done" && (
+        {currentUrl && resumeVersionId && (
           <Button
             type="button"
             size="sm"
             variant="outline"
             disabled={savingCorrections}
             onClick={handleSaveCorrections}
-            title="如果你手动改过 AI 填的内容，点这个把改动存下来，下次遇到相似问题会直接用改过的版本"
+            title="把这页你自己写过或修改过的开放题回答存进记忆库，下次优先复用"
           >
             <Check className="size-4" />
-            {savingCorrections ? "保存中..." : "保存修改"}
+            {savingCorrections ? "记忆中..." : "记住本页回答"}
           </Button>
         )}
         <span className="mx-1 h-5 w-px bg-border" />
@@ -704,15 +704,25 @@ export function EmbeddedBrowser({
       />
       <AiProgress active={capturing} expectedSeconds={15} stages={["正在读页面正文…", "AI 正在解析公司/岗位/薪资并打分…"]} />
       {status && (
-        <p
+        <div
           className={
             status.phase === "error"
               ? "rounded-md bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
               : "rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground"
           }
         >
-          {status.message}
-        </p>
+          <p>{status.message}</p>
+          {status.details && status.details.length > 0 && (
+            <details className="mt-1">
+              <summary className="cursor-pointer">查看逐字段结果（{status.details.length}）</summary>
+              <ul className="mt-1 max-h-40 space-y-0.5 overflow-auto">
+                {status.details.map((item, index) => (
+                  <li key={`${item.label}-${index}`}>{item.state} · {item.label}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
 
       <div ref={panelRef} className="relative min-h-0 flex-1 rounded-lg border bg-muted/30">

@@ -757,6 +757,8 @@ model AutofillAnswer {
   resumeVersionId String
   questionLabel   String
   answer          String
+  kind            String   @default("essay")
+  confirmed       Boolean  @default(false)
   /// Optional company/position context for portal-specific answers. Null is a
   /// deliberately generic answer and may be reused across companies.
   contextKey      String?
@@ -768,6 +770,7 @@ model AutofillAnswer {
 
   @@index([userId, resumeVersionId])
   @@index([userId, resumeVersionId, contextKey])
+  @@index([userId, confirmed, contextKey])
 }
 
 // Pre-application prep guide: what to prepare before applying. Lives on
